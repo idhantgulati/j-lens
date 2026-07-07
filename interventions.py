@@ -32,30 +32,35 @@ def apply_edits(model, edits):
 
 
 def swap_edits(lens, model, layers, pairs, alpha=1.0):
-    """Coordinate swap: exchange each pair's lens coordinates, leaving the rest
-    of the activation unchanged (paper §2.5 / §3.1: subtract the projection
-    onto the source lens vector, add an equal-magnitude projection onto the
-    target's, and vice versa).
+    """Coordinate swap (paper §2.5): exchange the two tokens' lens coordinates,
+    leaving the component outside span{v_s, v_t} unchanged.
 
-    Coordinates are inner products with unit-normed lens vectors rather than
-    pinv(V) h: same-category lens vectors are highly correlated (cos 0.5-0.75
-    on Qwen3.5-4B), which makes the pseudoinverse coordinates of §2.5's
-    formulation ill-conditioned at this scale.
+    For unit-normed vectors the pinv-coordinate swap h + V(sigma(c) - c) is
+    exactly a reflection across the pair's bisector hyperplane,
+    h - 2 (h.u) u with u ∝ v_s - v_t, which we use because it stays
+    well-conditioned when v_s and v_t are highly correlated (cos 0.5-0.75 for
+    same-category tokens on Qwen3.5-4B). alpha scales the exchanged amount
+    (alpha=1 is the exact swap; alpha=2 the paper's "double strength").
 
     pairs: [(source_token_id, target_token_id), ...], applied at every
     position of the given layers.
     """
     edits = []
     for layer in layers:
-        ids = [i for pair in pairs for i in pair]
-        V = lens.vectors(model, layer, ids)
-        V = V / V.norm(dim=1, keepdim=True)  # [2m, d]
-        perm = [i + 1 if i % 2 == 0 else i - 1 for i in range(len(ids))]
+        us = []
+        for s, t in pairs:
+            V = lens.vectors(model, layer, [s, t])
+            V = V / V.norm(dim=1, keepdim=True)
+            u = V[0] - V[1]
+            us.append(u / u.norm())
+        U = torch.stack(us)  # [m, d]
 
-        def fn(h, V=V, perm=perm):
-            Vd = V.to(device=h.device, dtype=torch.float32)
-            c = h.float() @ Vd.T  # [B, T, 2m]
-            return (h.float() + alpha * (c[..., perm] - c) @ Vd).to(h.dtype)
+        def fn(h, U=U):
+            Ud = U.to(device=h.device, dtype=torch.float32)
+            hf = h.float()
+            for u in Ud:  # sequential reflections (pair directions overlap)
+                hf = hf - 2 * alpha * (hf @ u)[..., None] * u
+            return hf.to(h.dtype)
 
         edits.append((layer, fn))
     return edits
