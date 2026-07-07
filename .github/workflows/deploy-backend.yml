@@ -1,0 +1,22 @@
+name: deploy-backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Visualizer/backend/**"
+      - "jlens.py"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install modal
+      - run: modal deploy Visualizer/backend/app.py

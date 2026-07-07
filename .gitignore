@@ -4,3 +4,7 @@ data/
 *.pt
 __pycache__/
 .ipynb_checkpoints/
+.env
+.vercel/
+node_modules/
+.DS_Store
