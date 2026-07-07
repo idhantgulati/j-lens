@@ -1,0 +1,6 @@
+paper/
+knowledge/
+data/
+*.pt
+__pycache__/
+.ipynb_checkpoints/
