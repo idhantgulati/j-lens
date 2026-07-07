@@ -32,22 +32,30 @@ def apply_edits(model, edits):
 
 
 def swap_edits(lens, model, layers, pairs, alpha=1.0):
-    """Coordinate swap: h += alpha * V (sigma(c) - c), c = pinv(V) h.
+    """Coordinate swap: exchange each pair's lens coordinates, leaving the rest
+    of the activation unchanged (paper §2.5 / §3.1: subtract the projection
+    onto the source lens vector, add an equal-magnitude projection onto the
+    target's, and vice versa).
 
-    pairs: [(source_token_id, target_token_id), ...]; sigma exchanges each
-    pair's two coordinates. Applied at every position of the given layers.
+    Coordinates are inner products with unit-normed lens vectors rather than
+    pinv(V) h: same-category lens vectors are highly correlated (cos 0.5-0.75
+    on Qwen3.5-4B), which makes the pseudoinverse coordinates of §2.5's
+    formulation ill-conditioned at this scale.
+
+    pairs: [(source_token_id, target_token_id), ...], applied at every
+    position of the given layers.
     """
     edits = []
     for layer in layers:
         ids = [i for pair in pairs for i in pair]
-        V = lens.vectors(model, layer, ids).T  # [d, 2m]
+        V = lens.vectors(model, layer, ids)
+        V = V / V.norm(dim=1, keepdim=True)  # [2m, d]
         perm = [i + 1 if i % 2 == 0 else i - 1 for i in range(len(ids))]
-        Vp = torch.linalg.pinv(V)  # [2m, d]
 
-        def fn(h, V=V, Vp=Vp, perm=perm):
+        def fn(h, V=V, perm=perm):
             Vd = V.to(device=h.device, dtype=torch.float32)
-            c = h.float() @ Vp.to(h.device).T  # [B, T, 2m]
-            return (h.float() + alpha * (c[..., perm] - c) @ Vd.T).to(h.dtype)
+            c = h.float() @ Vd.T  # [B, T, 2m]
+            return (h.float() + alpha * (c[..., perm] - c) @ Vd).to(h.dtype)
 
         edits.append((layer, fn))
     return edits

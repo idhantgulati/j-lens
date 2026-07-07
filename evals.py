@@ -64,6 +64,19 @@ def token_ids_of(tok, word):
     return sorted(ids)
 
 
+def pair_token_ids(tok, source, target):
+    """Token-id pairs for a swap, matched by surface form (leading space and
+    case must agree within a pair, else the swap mixes unrelated directions)."""
+    pairs = []
+    for f in (lambda w: " " + w, lambda w: " " + w.lower(), lambda w: w,
+              lambda w: w.lower()):
+        a = tok.encode(f(source), add_special_tokens=False)
+        b = tok.encode(f(target), add_special_tokens=False)
+        if len(a) == 1 and len(b) == 1 and (a[0], b[0]) not in pairs:
+            pairs.append((a[0], b[0]))
+    return pairs
+
+
 def rank_of(logits, ids):
     """Best (1-indexed) rank of any of `ids` in a [vocab] logit vector."""
     if not ids:
@@ -89,8 +102,9 @@ def pass_at_k(model, tok, lens, name, ks=(1, 2, 5, 10, 25, 100), use_jacobian=Tr
     items = fetch("evaluations", name)["items"]
     hits = {k: [] for k in ks}
     for item in items:
-        pos = readout_position(tok, name, item["prompt"])
-        out, _, _ = lens.readout(model, tok, item["prompt"], layers=layers,
+        prompt = item["prompt"].rstrip()  # a trailing space would become the readout token
+        pos = readout_position(tok, name, prompt)
+        out, _, _ = lens.readout(model, tok, prompt, layers=layers,
                                  positions=[pos], use_jacobian=use_jacobian)
         for word in item["intermediates"]:
             ids = token_ids_of(tok, word)
