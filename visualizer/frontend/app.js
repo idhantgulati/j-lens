@@ -574,12 +574,21 @@ function togglePinChart(i) {
   refreshPinViews();
 }
 
-async function pinToken({ tokenId = null, tokenStr = null }) {
+async function pinToken({ tokenId = null, tokenStr = null, ensure = false }) {
   const existing = findPin({ tokenId, tokenStr });
   if (existing >= 0) {
     const pin = S.pins[existing];
     if (pin.loading) { S.activePin = existing; renderPins(); return; }
-    if (pin.ranks) { togglePinChart(existing); return; }
+    if (pin.ranks) {
+      if (ensure) {
+        pin.chartHidden = false;
+        S.activePin = existing;
+        refreshPinViews();
+        return;
+      }
+      togglePinChart(existing);
+      return;
+    }
   }
   const pin = {
     tokenId,
@@ -1354,12 +1363,13 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => { if (S.resp) renderCharts(); }, 150);
 });
 
-$("pin-form").addEventListener("submit", (e) => {
+$("pin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const v = $("pin-input").value;
-  if (!v || !S.resp) return;
+  const raw = $("pin-input").value;
+  if (!raw || !S.resp) return;
   $("pin-input").value = "";
-  pinToken({ tokenStr: v });
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  for (const tokenStr of parts) await pinToken({ tokenStr, ensure: true });
 });
 
 warmup();
