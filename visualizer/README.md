@@ -35,14 +35,28 @@ on cache miss it re-runs the forward from the prompt (`"recomputed": true`).
 
 ## API
 
+All POST endpoints share the prompt params `{prompt, chat, system_prompt, prefill,
+max_new_tokens}`. Chat mode applies Qwen's chat template (`enable_thinking=False`,
+per the paper's verbal-report protocol) with optional system prompt; prefill text is
+appended to the template so the assistant's reply is forced to start with it.
+`max_new_tokens` (≤ 48) generates a greedy continuation and the lens covers those
+tokens too.
+
 - `GET /healthz` — liveness, no GPU.
 - `GET /warmup` — boots/touches the GPU container.
-- `POST /api/analyze` `{prompt, top_k}` → `strings` (dedup token table),
-  `prompt_tokens`, `jlens`/`logit_lens` `{topk, probs}` as `[31][P][k]` indices into
-  `strings`, `model` `{topk, probs}` `[P][k]`, `workspace_band`, `request_id`,
-  `timing_ms`. Prompt capped at 4000 chars / 200 tokens; `top_k` clamped to [1, 10].
-- `POST /api/rank` `{request_id, prompt, token_id|token_str}` →
+- `POST /api/analyze` `{...params, top_k}` → `strings` (dedup token table),
+  `prompt_tokens` (prompt + generated), `gen_start`, `completion`,
+  `jlens`/`logit_lens` `{topk, probs}` as `[31][P][k]` indices into `strings`,
+  `model` `{topk, probs}` `[P][k]`, `workspace_band`, `request_id`, `timing_ms`.
+  Prompt capped at 4000 chars / 200 tokens; `top_k` clamped to [1, 10].
+- `POST /api/rank` `{...params, request_id, token_id|token_str}` →
   `jlens_ranks`/`logit_lens_ranks` `[31][P]`, `model_ranks` `[P]` (1-based).
+- `POST /api/intervene` `{...params, kind: "swap"|"steer", source, target?,
+  strength?, layer_lo?, layer_hi?}` → default vs modified greedy generations plus
+  next-token top-5 for each. Swap exchanges the two tokens' lens coordinates
+  (bisector reflection, α=1, all single-token surface-form pairs) across the layer
+  band; steer adds `strength × mean_residual_norm × unit lens vector` at every
+  position (useful range ±0.005–0.05; on 4B there's a sharp threshold near 0.02).
 
 ## Deploy
 

@@ -8,8 +8,8 @@ const API = window.JLENS_API;
 
 // Pin palettes tuned per theme so chips and chart lines stay readable.
 const PIN_PALETTES = {
-  light: ["#9a6209", "#2e7d52", "#3f6ea5", "#8c4f96", "#c05746", "#5c6b48"],
-  dark:  ["#d9a441", "#7fb886", "#8ab4dd", "#c79ecf", "#d98079", "#a8b48a"],
+  light: ["#b3561b", "#2e7d52", "#2d5e9d", "#8c4f96", "#c05746", "#5c6b48"],
+  dark:  ["#eeb060", "#7fb886", "#8ab4dd", "#c79ecf", "#d98079", "#a8b48a"],
 };
 const RANK_CLASSES = [
   [1, "rank-r1"], [10, "rank-r10"], [100, "rank-r100"], [1000, "rank-r1k"], [Infinity, "rank-r10k"],
@@ -17,14 +17,27 @@ const RANK_CLASSES = [
 
 const S = {
   resp: null,
-  prompt: "",
+  params: null,        // prompt params of the current result (for rank/intervene reuse)
   mode: "jlens",       // "jlens" | "logit_lens"
   gridMode: "argmax",  // "argmax" | "rank"
+  chat: "raw",         // "raw" | "chat"
   sel: { layer: 24, pos: 0 },
   pins: [],            // {tokenId, text, colorIdx, ranks, loading}
   activePin: -1,
   ready: false,
+  ivKind: "swap",      // "swap" | "steer"
 };
+
+// Prompt parameters as currently configured in the controls.
+function promptParams() {
+  return {
+    prompt: $("prompt").value,
+    chat: S.chat === "chat",
+    system_prompt: $("system-prompt").value || null,
+    prefill: $("prefill").value || null,
+    max_new_tokens: +$("gen-len").value,
+  };
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -33,18 +46,12 @@ const $ = (id) => document.getElementById(id);
 function theme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
 function pinColor(p) { return PIN_PALETTES[theme()][p.colorIdx % 6]; }
 
-function applyThemeLabel() {
-  $("theme-toggle").textContent = theme() === "dark" ? "light mode" : "dark mode";
-}
-
 $("theme-toggle").addEventListener("click", () => {
   const next = theme() === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("jlens-theme", next);
-  applyThemeLabel();
   if (S.resp) { renderPins(); renderCharts(); }
 });
-applyThemeLabel();
 
 // ---------- small utils ----------
 
@@ -138,8 +145,8 @@ async function warmup() {
 // ---------- analyze ----------
 
 async function analyze() {
-  const prompt = $("prompt").value;
-  if (!prompt.trim()) return;
+  const params = promptParams();
+  if (!params.prompt.trim()) return;
   const btn = $("analyze-btn");
   btn.disabled = true;
   btn.textContent = "reading…";
@@ -152,7 +159,7 @@ async function analyze() {
     const r = await fetch(`${API}/api/analyze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, top_k: 10 }),
+      body: JSON.stringify({ ...params, top_k: 10 }),
     });
     if (!r.ok) {
       const detail = (await r.json().catch(() => ({}))).detail;
@@ -160,7 +167,7 @@ async function analyze() {
     }
     S.resp = await r.json();
     S.resp.client_ms = Math.round(performance.now() - t0);
-    S.prompt = prompt;
+    S.params = params;
     S.pins = [];
     S.activePin = -1;
     S.gridMode = "argmax";
@@ -204,8 +211,8 @@ async function pinToken({ tokenId = null, tokenStr = null }) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        ...S.params,
         request_id: S.resp.request_id,
-        prompt: S.prompt,
         token_id: tokenId,
         token_str: tokenStr,
       }),
@@ -251,22 +258,83 @@ function unpin(i) {
 // ---------- rendering ----------
 
 function renderAll() {
+  renderCompletion();
   renderPrediction();
   renderPins();
   renderMeta();
   renderGrid();
+  renderJSpace();
   renderByLayer();
   renderByPos();
   renderCharts();
 }
 
+function isGen(p) {
+  return S.resp.gen_start !== undefined && p >= S.resp.gen_start;
+}
+
+function renderCompletion() {
+  const r = S.resp;
+  const card = $("completion-card");
+  if (!r.completion) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  const gen = r.prompt_tokens.slice(r.gen_start).map((si, i) =>
+    `<button class="gen-tok" data-pos="${r.gen_start + i}" title="jump to position ${r.gen_start + i}">${esc(showTok(r.strings[si]))}</button>`
+  ).join("");
+  $("completion").innerHTML = gen;
+}
+
 function renderPrediction() {
   const r = S.resp;
   const P = r.prompt_tokens.length;
+  $("prediction-label").textContent = r.completion
+    ? "model prediction · token after the output" : "model prediction · next token";
   $("prediction-list").innerHTML = r.model.topk[P - 1].slice(0, 5).map((si, i) =>
     `<button class="pred" data-si="${si}" title="pin this token">` +
     `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[P - 1][i])}</span></button>`
   ).join("");
+}
+
+// ---------- J-Space aggregate (neuronpedia-style count view) ----------
+
+function renderJSpace() {
+  const r = S.resp;
+  if (!r) return;
+  const data = r[S.mode];
+  const L = r.lens_layers.length;
+  const P = r.prompt_tokens.length;
+  const [w0, w1] = r.workspace_band;
+  const stats = new Map(); // strIdx -> {total, perLayer: Int32Array}
+  for (let li = 0; li < L; li++) {
+    if (r.lens_layers[li] < w0 || r.lens_layers[li] > w1) continue; // workspace cells only
+    const layerTop = data.topk[li];
+    for (let p = 0; p < P; p++) {
+      for (const si of layerTop[p]) {
+        let s = stats.get(si);
+        if (!s) { s = { total: 0, perLayer: new Int32Array(L) }; stats.set(si, s); }
+        s.total++;
+        s.perLayer[li]++;
+      }
+    }
+  }
+  const rows = [...stats.entries()]
+    // Content words only: needs a letter/digit, no template fragments (<|im_end|>, </think>).
+    .filter(([si]) => /\p{L}|\p{N}/u.test(r.strings[si]) && !/<.*>/.test(r.strings[si]))
+    .sort((a, b) => b[1].total - a[1].total).slice(0, 40);
+  const maxCell = Math.max(1, ...rows.map(([, s]) => Math.max(...s.perLayer)));
+  $("jspace").innerHTML = rows.map(([si, s]) => {
+    const strip = Array.from(s.perLayer, (c, li) =>
+      `<i style="opacity:${c ? (0.15 + 0.85 * c / maxCell).toFixed(2) : 0}" title="L${r.lens_layers[li]}: ${c}×"></i>`
+    ).join("");
+    return `<div class="js-row">` +
+      `<button class="tok js-tok" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">${esc(showTok(r.strings[si]))}</button>` +
+      `<span class="js-count">${s.total}</span>` +
+      `<span class="js-strip" aria-hidden="true">${strip}</span>` +
+      `<span class="js-actions">` +
+      `<button class="mini-btn" data-iv="steer" data-si="${si}">steer</button>` +
+      `<button class="mini-btn" data-iv="swap" data-si="${si}">swap</button>` +
+      `</span></div>`;
+  }).join("") || `<p class="panel-hint js-empty">no readout data</p>`;
 }
 
 function renderPins() {
@@ -331,9 +399,10 @@ function renderGrid() {
   });
 
   const axis = r.prompt_tokens.map((si, p) =>
-    `<td class="axis-tok${p === S.sel.pos ? " sel-col" : ""}" data-axis="${p}" title="position ${p}">` +
+    `<td class="axis-tok${p === S.sel.pos ? " sel-col" : ""}${isGen(p) ? " is-gen" : ""}" data-axis="${p}"` +
+    ` title="position ${p}${isGen(p) ? " (generated)" : ""}">` +
     `${esc(showTok(r.strings[si]))}</td>`).join("");
-  rows.push(`<tr class="axis-row"><th class="layer-label">prompt →</th>${axis}</tr>`);
+  rows.push(`<tr class="axis-row"><th class="layer-label">${r.completion ? "prompt + output →" : "prompt →"}</th>${axis}</tr>`);
   $("grid").style.minWidth = `${96 + 80 * P}px`;
   $("grid").innerHTML = rows.join("");
 }
@@ -369,8 +438,8 @@ function renderByPos() {
     const toks = tk.map((si, i) =>
       `<button class="tok${i === 0 ? " rank1" : ""}" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">` +
       `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></button>`).join("");
-    rows.push(`<div class="stack-row${p === S.sel.pos ? " is-selected" : ""}">` +
-      `<span class="rl" data-pos="${p}" title="select this position">${p} ${esc(showTok(r.strings[r.prompt_tokens[p]]).slice(0, 8))}</span>` +
+    rows.push(`<div class="stack-row${p === S.sel.pos ? " is-selected" : ""}${isGen(p) ? " is-gen-row" : ""}">` +
+      `<span class="rl" data-pos="${p}" title="select this position${isGen(p) ? " (generated token)" : ""}">${p} ${esc(showTok(r.strings[r.prompt_tokens[p]]).slice(0, 8))}</span>` +
       `<span class="toks">${toks}</span></div>`);
   }
   $("by-pos").innerHTML = rows.join("");
@@ -476,15 +545,124 @@ $("prompt").addEventListener("keydown", (e) => {
 });
 
 document.querySelectorAll("#examples .example").forEach((b) =>
-  b.addEventListener("click", () => { $("prompt").value = b.textContent; analyze(); }));
+  b.addEventListener("click", () => {
+    $("prompt").value = b.textContent;
+    const chat = b.dataset.chat === "chat" ? "chat" : "raw";
+    document.querySelector(`#chat-toggle [data-chat="${chat}"]`).click();
+    analyze();
+  }));
 
 document.querySelectorAll("#mode-toggle .seg-btn").forEach((b) =>
   b.addEventListener("click", () => {
     S.mode = b.dataset.mode;
     document.querySelectorAll("#mode-toggle .seg-btn").forEach((x) =>
       x.classList.toggle("active", x === b));
-    if (S.resp) { renderGrid(); renderByLayer(); renderByPos(); renderCharts(); }
+    if (S.resp) { renderGrid(); renderJSpace(); renderByLayer(); renderByPos(); renderCharts(); }
   }));
+
+// ---------- run config (chat mode, generation length, advanced) ----------
+
+document.querySelectorAll("#chat-toggle .seg-btn").forEach((b) =>
+  b.addEventListener("click", () => {
+    S.chat = b.dataset.chat;
+    document.querySelectorAll("#chat-toggle .seg-btn").forEach((x) =>
+      x.classList.toggle("active", x === b));
+    document.body.classList.toggle("chat-mode", S.chat === "chat");
+  }));
+
+$("advanced-toggle").addEventListener("click", () => {
+  const adv = $("advanced");
+  const open = adv.classList.toggle("hidden");
+  $("advanced-toggle").textContent = open ? "more options" : "fewer options";
+  $("advanced-toggle").setAttribute("aria-expanded", String(!open));
+});
+
+// ---------- interventions ----------
+
+function openIntervene(kind, tokenText) {
+  S.ivKind = kind;
+  document.querySelectorAll("#intervene-kind .seg-btn").forEach((x) =>
+    x.classList.toggle("active", x.dataset.kind === kind));
+  $("iv-target-wrap").classList.toggle("hidden", kind !== "swap");
+  $("iv-strength-wrap").classList.toggle("hidden", kind !== "steer");
+  $("intervene-title").textContent = kind === "swap"
+    ? "swap · exchange two workspace concepts" : "steer · inject a concept into the workspace";
+  if (tokenText !== undefined) $("iv-source").value = tokenText.trim();
+  $("iv-results").classList.add("hidden");
+  $("intervene-panel").classList.remove("hidden");
+  $("intervene-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  (kind === "swap" && $("iv-source").value ? $("iv-target") : $("iv-source")).focus();
+}
+
+async function runIntervention() {
+  const btn = $("iv-run");
+  const source = $("iv-source").value.trim();
+  if (!source || !S.params) return;
+  if (S.ivKind === "swap" && !$("iv-target").value.trim()) { $("iv-target").focus(); return; }
+  btn.disabled = true;
+  btn.textContent = "running…";
+  $("error-banner").classList.add("hidden");
+  try {
+    const body = {
+      ...S.params,
+      max_new_tokens: Math.max(16, S.params.max_new_tokens || 0),
+      kind: S.ivKind,
+      source,
+      target: S.ivKind === "swap" ? $("iv-target").value.trim() : null,
+      strength: +$("iv-strength").value,
+      layer_lo: +$("iv-lo").value,
+      layer_hi: +$("iv-hi").value,
+    };
+    const r = await fetch(`${API}/api/intervene`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail;
+      throw new Error(detail || `intervention failed (${r.status})`);
+    }
+    const d = await r.json();
+    const fmtTop = (top) => top.map((t, i) =>
+      `<span class="tok${i === 0 ? " rank1" : ""}">${esc(showTok(t.token))}<span class="p">${fmtProb(t.prob)}</span></span>`).join("");
+    const fmtSide = (side) =>
+      `<p class="iv-gen">${esc(side.text) || "<i>(empty)</i>"}</p><div class="iv-top">${fmtTop(side.top)}</div>`;
+    $("iv-default").innerHTML = fmtSide(d.default);
+    $("iv-modified").innerHTML = fmtSide(d.modified);
+    $("iv-mod-label").textContent = d.kind === "swap"
+      ? `swapped ${d.pairs.map(([a, b]) => `${JSON.stringify(a)} → ${JSON.stringify(b)}`).join(", ")} · L${d.layers[0]}–${d.layers[1]}`
+      : `steered ${JSON.stringify(d.token)} @ ${d.strength} · L${d.layers[0]}–${d.layers[1]}`;
+    $("iv-results").classList.remove("hidden");
+  } catch (e) {
+    const banner = $("error-banner");
+    banner.textContent = `Intervention failed: ${e.message}`;
+    banner.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run intervention";
+  }
+}
+
+document.querySelectorAll("#intervene-kind .seg-btn").forEach((b) =>
+  b.addEventListener("click", () => openIntervene(b.dataset.kind)));
+$("intervene-close").addEventListener("click", () => $("intervene-panel").classList.add("hidden"));
+$("iv-run").addEventListener("click", runIntervention);
+$("iv-strength").addEventListener("input", () => { $("iv-strength-val").textContent = $("iv-strength").value; });
+for (const id of ["iv-source", "iv-target"]) {
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runIntervention(); } });
+}
+
+$("jspace").addEventListener("click", (e) => {
+  const iv = e.target.closest(".mini-btn");
+  if (iv) return openIntervene(iv.dataset.iv, S.resp.strings[+iv.dataset.si]);
+  const tok = e.target.closest(".js-tok");
+  if (tok) return pinToken({ tokenId: S.resp.token_ids[+tok.dataset.si] });
+});
+
+$("completion").addEventListener("click", (e) => {
+  const t = e.target.closest(".gen-tok");
+  if (t) select({ pos: +t.dataset.pos });
+});
 
 document.querySelectorAll("#grid-mode .seg-btn").forEach((b) =>
   b.addEventListener("click", () => { if (!b.disabled) setGridMode(b.dataset.grid); }));

@@ -1,58 +1,59 @@
-/* J-Lens Visualizer — classic paper light theme + warm charcoal dark theme.
-   One accent (amber, the lens light); everything else is ink and grey. */
+/* J-Lens Visualizer — warm daylight light theme + blue night dark theme
+   (palette borrowed from idhant.xyz: day #fffdfa / dusk #db7a2a / night #0a1529 / evening #fccc83).
+   One warm accent (the lens light); everything else is ink and grey. */
 
 :root,
 :root[data-theme="light"] {
-  --bg: #f6f4ee;
-  --panel: #fdfcf9;
-  --panel-2: #f0ede4;
-  --line: #e0dccf;
-  --line-soft: #eae6da;
-  --ink: #26241f;
-  --muted: #6f6a5e;
-  --faint: #a09a8c;
-  --accent: #9a6209;            /* amber ink, readable on paper */
-  --accent-soft: rgba(193, 141, 26, 0.12);
-  --btn-bg: #26241f;
-  --btn-ink: #f6f4ee;
+  --bg: #fffdfa;
+  --panel: #ffffff;
+  --panel-2: #f8f3ea;
+  --line: #e7e0d1;
+  --line-soft: #f0eadd;
+  --ink: #1f2937;
+  --muted: #4b5563;
+  --faint: #9ca3af;
+  --accent: #b3561b;            /* dusk orange, darkened to read on paper */
+  --accent-soft: rgba(219, 122, 42, 0.12);
+  --btn-bg: #1f2937;
+  --btn-ink: #fffdfa;
   --ok: #3d7a44;
   --bad: #a33a32;
   --bad-bg: rgba(163, 58, 50, 0.07);
-  --band-workspace: rgba(193, 141, 26, 0.07);
-  --band-motor: rgba(70, 84, 105, 0.07);
-  --motor-ink: #4c5a70;
-  --r1: rgba(228, 168, 44, 0.95);
-  --r10: rgba(228, 168, 44, 0.55);
-  --r100: rgba(228, 168, 44, 0.30);
-  --r1k: rgba(228, 168, 44, 0.14);
+  --band-workspace: rgba(219, 122, 42, 0.07);
+  --band-motor: rgba(45, 94, 157, 0.07);
+  --motor-ink: #2d5e9d;
+  --r1: rgba(219, 122, 42, 0.95);
+  --r10: rgba(219, 122, 42, 0.55);
+  --r100: rgba(219, 122, 42, 0.30);
+  --r1k: rgba(219, 122, 42, 0.14);
   --r10k: rgba(120, 112, 96, 0.07);
-  --shadow: 0 1px 2px rgba(40, 35, 20, 0.05);
+  --shadow: 0 1px 2px rgba(26, 25, 23, 0.05);
 }
 
 :root[data-theme="dark"] {
-  --bg: #181613;
-  --panel: #1f1d19;
-  --panel-2: #282520;
-  --line: #363228;
-  --line-soft: #2c2922;
-  --ink: #e9e4d8;
-  --muted: #a29b8a;
-  --faint: #6f695c;
-  --accent: #d9a441;
-  --accent-soft: rgba(217, 164, 65, 0.14);
-  --btn-bg: #e9e4d8;
-  --btn-ink: #26241f;
+  --bg: #0a1529;
+  --panel: #0f1b31;
+  --panel-2: #16233c;
+  --line: #243350;
+  --line-soft: #1c2a44;
+  --ink: #e5e7eb;
+  --muted: #a7b1c2;
+  --faint: #64748b;
+  --accent: #eeb060;            /* evening gold on the night sky */
+  --accent-soft: rgba(252, 204, 131, 0.13);
+  --btn-bg: #e5e7eb;
+  --btn-ink: #0f172a;
   --ok: #7fb886;
   --bad: #d98079;
   --bad-bg: rgba(217, 128, 121, 0.08);
-  --band-workspace: rgba(217, 164, 65, 0.07);
-  --band-motor: rgba(125, 145, 175, 0.08);
-  --motor-ink: #93a7c4;
-  --r1: rgba(228, 172, 56, 0.92);
-  --r10: rgba(228, 172, 56, 0.50);
-  --r100: rgba(228, 172, 56, 0.28);
-  --r1k: rgba(228, 172, 56, 0.13);
-  --r10k: rgba(160, 150, 130, 0.07);
+  --band-workspace: rgba(252, 204, 131, 0.08);
+  --band-motor: rgba(71, 163, 243, 0.09);
+  --motor-ink: #7fb0e0;
+  --r1: rgba(240, 178, 90, 0.92);
+  --r10: rgba(240, 178, 90, 0.50);
+  --r100: rgba(240, 178, 90, 0.28);
+  --r1k: rgba(240, 178, 90, 0.13);
+  --r10k: rgba(140, 150, 170, 0.08);
   --shadow: none;
 }
 
@@ -105,9 +106,14 @@ h1 { font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacin
 
 .theme-toggle {
   background: none; border: 1px solid var(--line); border-radius: 6px;
-  color: var(--muted); font-size: 12px; padding: 3px 10px;
+  color: var(--muted); padding: 4px; display: inline-flex; align-items: center;
 }
 .theme-toggle:hover { color: var(--ink); border-color: var(--faint); }
+.theme-toggle svg { width: 16px; height: 16px; display: block; }
+/* show the sun while dark (click → light), the moon while light */
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
 /* ---- prompt row ---- */
 .prompt-row { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
@@ -132,6 +138,45 @@ h1 { font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacin
 .seg-btn.active { background: var(--panel-2); color: var(--ink); font-weight: 600; }
 .seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .seg.small .seg-btn { padding: 4px 10px; font-size: 12px; }
+
+/* ---- run config + advanced options ---- */
+.run-config { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cfg-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 12.5px; white-space: nowrap;
+}
+.cfg-label select, .iv-num {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12.5px;
+}
+.iv-num { width: 52px; font-family: var(--mono); }
+.mono-val { font-family: var(--mono); font-size: 12px; color: var(--ink); min-width: 40px; }
+.advanced {
+  margin-top: 10px; display: flex; flex-wrap: wrap; gap: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 15px;
+}
+.adv-field {
+  display: flex; flex-direction: column; gap: 4px; flex: 1 1 300px;
+  font-size: 12px; color: var(--muted);
+}
+.adv-hint { color: var(--faint); }
+.adv-field input {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: 13px;
+}
+.adv-field input::placeholder { color: var(--faint); }
+body:not(.chat-mode) .adv-field { opacity: 0.45; }
+body.chat-mode .adv-field { opacity: 1; }
+
+/* ---- completion (generated output) ---- */
+#completion-card { margin-bottom: 12px; }
+.completion { display: flex; flex-wrap: wrap; gap: 3px; }
+.gen-tok {
+  font-family: var(--mono); font-size: 13.5px; background: var(--band-motor);
+  border: 1px solid transparent; border-radius: 4px; padding: 2px 4px;
+  color: var(--ink); white-space: pre; cursor: pointer;
+}
+.gen-tok:hover { border-color: var(--accent); }
 
 /* ---- patience note (cold start) ---- */
 .patience {
@@ -248,11 +293,54 @@ h1 { font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacin
 #grid tr.sel-row td.cell { background-color: var(--accent-soft); }
 #grid td.cell.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* rank heatmap mode */
-#grid.rank-mode td.cell.rank-r1 { background-color: var(--r1); color: #26241f; font-weight: 600; }
+#grid.rank-mode td.cell.rank-r1 { background-color: var(--r1); color: #1f2937; font-weight: 600; }
 #grid.rank-mode td.cell.rank-r10 { background-color: var(--r10); font-weight: 600; }
 #grid.rank-mode td.cell.rank-r100 { background-color: var(--r100); }
 #grid.rank-mode td.cell.rank-r1k { background-color: var(--r1k); color: var(--muted); }
 #grid.rank-mode td.cell.rank-r10k { background-color: var(--r10k); color: var(--faint); }
+
+/* generated positions in the axis + stacks */
+#grid td.axis-tok.is-gen { color: var(--motor-ink); font-style: italic; }
+.stack-row.is-gen-row .rl { color: var(--motor-ink); font-style: italic; }
+
+/* ---- J-Space aggregate panel ---- */
+.jspace { max-height: 340px; overflow-y: auto; padding: 6px 0; }
+.js-row { display: flex; align-items: center; gap: 10px; padding: 2.5px 15px; }
+.js-row:hover { background: var(--accent-soft); }
+.js-tok { min-width: 120px; text-align: left; }
+.js-count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 34px; text-align: right; }
+.js-strip { display: inline-flex; gap: 1px; flex: 1; min-width: 120px; max-width: 420px; height: 12px; }
+.js-strip i { flex: 1; background: var(--accent); border-radius: 1px; }
+.js-actions { display: inline-flex; gap: 5px; visibility: hidden; }
+.js-row:hover .js-actions { visibility: visible; }
+.mini-btn {
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 5px; padding: 1px 8px; font-size: 11px;
+}
+.mini-btn:hover { color: var(--accent); border-color: var(--accent); }
+.js-empty { padding: 10px 15px; }
+
+/* ---- intervention panel ---- */
+.intervene-body { padding: 12px 15px; }
+.intervene-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.iv-input {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 6px; padding: 5px 9px; font-family: var(--mono); font-size: 13px; width: 130px;
+}
+.iv-input::placeholder { color: var(--faint); }
+#iv-run {
+  background: var(--btn-bg); color: var(--btn-ink); border: none; border-radius: 7px;
+  padding: 7px 16px; font-weight: 600; font-size: 13px;
+}
+#iv-run:disabled { opacity: 0.55; cursor: wait; }
+#intervene-panel .panel-head { justify-content: space-between; }
+#iv-note { margin-top: 10px; max-width: 720px; }
+.iv-results { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+@media (max-width: 800px) { .iv-results { grid-template-columns: 1fr; } }
+.iv-col { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 13px; }
+.iv-gen { font-family: var(--mono); font-size: 13.5px; margin: 0 0 8px; white-space: pre-wrap; }
+.iv-top { display: flex; flex-wrap: wrap; gap: 4px; }
+#iv-strength-wrap input[type="range"] { accent-color: var(--accent); }
 
 /* ---- detail panels ---- */
 .detail-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -293,14 +381,23 @@ footer summary:hover { color: var(--ink); }
 .about { max-width: 860px; font-size: 14px; font-family: var(--serif); line-height: 1.6; }
 .about mjx-container { font-size: 105%; }
 
-.references { margin-top: 22px; max-width: 860px; }
+.references { margin-top: 22px; }
 .references h3 {
-  font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink); margin: 0 0 8px;
+  font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink); margin: 0 0 10px;
 }
-.references ul { margin: 0; padding-left: 20px; font-family: var(--serif); font-size: 13.5px; line-height: 1.65; }
-.references li { margin-bottom: 3px; }
+.references ul {
+  margin: 0; padding-left: 20px; font-family: var(--serif); font-size: 13.5px; line-height: 1.65;
+  column-count: 2; column-gap: 56px;
+}
+.references li { margin-bottom: 6px; break-inside: avoid; }
+.references li em { color: var(--ink); font-style: italic; }
+@media (max-width: 900px) { .references ul { column-count: 1; } }
 
 .colophon {
   margin-top: 22px; font-family: var(--serif); font-size: 13.5px;
   color: var(--muted); font-style: italic;
+}
+
+.version-line {
+  margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--faint);
 }
