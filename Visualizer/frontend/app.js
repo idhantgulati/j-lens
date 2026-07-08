@@ -2,13 +2,13 @@
 
 const API = window.JLENS_API;
 
-const PIN_COLORS = ["#ffd166", "#6ee7b7", "#7dd3fc", "#f0a8ff", "#fda4af", "#fbbf24"];
-const RANK_BG = [
-  [1,        "rgba(255,209,102,0.95)", false],
-  [10,       "rgba(255,178,82,0.60)",  false],
-  [100,      "rgba(224,122,95,0.38)",  true],
-  [1000,     "rgba(146,94,120,0.28)",  true],
-  [Infinity, "rgba(90,97,114,0.10)",   true],
+// Pin palettes tuned per theme so chips and chart lines stay readable.
+const PIN_PALETTES = {
+  light: ["#9a6209", "#2e7d52", "#3f6ea5", "#8c4f96", "#c05746", "#5c6b48"],
+  dark:  ["#d9a441", "#7fb886", "#8ab4dd", "#c79ecf", "#d98079", "#a8b48a"],
+};
+const RANK_CLASSES = [
+  [1, "rank-r1"], [10, "rank-r10"], [100, "rank-r100"], [1000, "rank-r1k"], [Infinity, "rank-r10k"],
 ];
 
 const S = {
@@ -17,11 +17,30 @@ const S = {
   mode: "jlens",       // "jlens" | "logit_lens"
   gridMode: "argmax",  // "argmax" | "rank"
   sel: { layer: 24, pos: 0 },
-  pins: [],            // {tokenId, text, color, ranks, loading}
+  pins: [],            // {tokenId, text, colorIdx, ranks, loading}
   activePin: -1,
+  ready: false,
 };
 
 const $ = (id) => document.getElementById(id);
+
+// ---------- theme ----------
+
+function theme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+function pinColor(p) { return PIN_PALETTES[theme()][p.colorIdx % 6]; }
+
+function applyThemeLabel() {
+  $("theme-toggle").textContent = theme() === "dark" ? "light mode" : "dark mode";
+}
+
+$("theme-toggle").addEventListener("click", () => {
+  const next = theme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("jlens-theme", next);
+  applyThemeLabel();
+  if (S.resp) { renderPins(); renderCharts(); }
+});
+applyThemeLabel();
 
 // ---------- small utils ----------
 
@@ -40,9 +59,9 @@ function fmtRank(r) {
 function fmtProb(p) {
   return p >= 0.1 ? p.toFixed(2) : p >= 0.001 ? p.toFixed(3) : p.toExponential(0);
 }
-function rankStyle(r) {
-  for (const [lim, bg, dim] of RANK_BG) if (r <= lim) return [bg, dim];
-  return RANK_BG[RANK_BG.length - 1].slice(1);
+function rankClass(r) {
+  for (const [lim, cls] of RANK_CLASSES) if (r <= lim) return cls;
+  return "rank-r10k";
 }
 function bandClass(layer) {
   const [w0, w1] = S.resp.workspace_band;
@@ -76,23 +95,38 @@ function cellTitle(layer, pos) {
   return `${layerLabel(layer)} @ pos ${pos} ${JSON.stringify(S.resp.strings[S.resp.prompt_tokens[pos]])}\n${lines.join("\n")}`;
 }
 
-// ---------- warmup ----------
+// ---------- status + cold start ----------
+
+function setStatus(state, text) {
+  const el = $("status");
+  el.className = `status is-${state}`;
+  $("status-text").textContent = text;
+}
+
+function setPatience(msg) {
+  const note = $("patience-note");
+  if (!msg) { note.classList.add("hidden"); return; }
+  note.textContent = msg;
+  note.classList.remove("hidden");
+}
 
 async function warmup() {
-  const badge = $("status-badge");
-  badge.className = "badge badge-warming";
-  badge.textContent = "waking GPU…";
-  const slow = setTimeout(() => { badge.textContent = "waking GPU… (~1 min, scales from zero)"; }, 3000);
+  setStatus("warming", "starting up");
+  const slow = setTimeout(() => {
+    setStatus("warming", "warming up");
+    setPatience("The GPU behind this page sleeps when nobody is around, and it takes about a minute to wake. Feel free to write your prompt in the meantime — it will run as soon as things are ready.");
+  }, 2500);
   try {
     const r = await fetch(`${API}/warmup`);
     if (!r.ok) throw new Error(await r.text());
     clearTimeout(slow);
-    badge.className = "badge badge-warm";
-    badge.textContent = "GPU ready";
+    S.ready = true;
+    setStatus("ready", "ready");
+    setPatience(null);
   } catch (e) {
     clearTimeout(slow);
-    badge.className = "badge badge-error";
-    badge.textContent = "backend unreachable";
+    setStatus("error", "backend unreachable");
+    setPatience("The backend could not be reached. Reloading the page usually fixes it; if not, the demo may be down for the moment.");
     console.error(e);
   }
 }
@@ -104,8 +138,12 @@ async function analyze() {
   if (!prompt.trim()) return;
   const btn = $("analyze-btn");
   btn.disabled = true;
-  btn.textContent = "computing…";
+  btn.textContent = "reading…";
   $("error-banner").classList.add("hidden");
+  const slow = setTimeout(() => {
+    if (!S.ready) setPatience("Still waking the GPU — your prompt is queued and will run the moment it's up.");
+  }, 2500);
+  const t0 = performance.now();
   try {
     const r = await fetch(`${API}/api/analyze`, {
       method: "POST",
@@ -117,6 +155,7 @@ async function analyze() {
       throw new Error(detail || `request failed (${r.status})`);
     }
     S.resp = await r.json();
+    S.resp.client_ms = Math.round(performance.now() - t0);
     S.prompt = prompt;
     S.pins = [];
     S.activePin = -1;
@@ -127,13 +166,15 @@ async function analyze() {
     $("results").classList.remove("hidden");
     $("examples").classList.add("hidden");
     renderAll();
-    $("status-badge").className = "badge badge-warm";
-    $("status-badge").textContent = "GPU ready";
+    S.ready = true;
+    setStatus("ready", "ready");
   } catch (e) {
     const banner = $("error-banner");
     banner.textContent = `Analyze failed: ${e.message}`;
     banner.classList.remove("hidden");
   } finally {
+    clearTimeout(slow);
+    setPatience(null);
     btn.disabled = false;
     btn.textContent = "Analyze";
   }
@@ -147,7 +188,7 @@ async function pinToken({ tokenId = null, tokenStr = null }) {
   const pin = {
     tokenId,
     text: tokenStr ?? S.resp.strings[S.resp.token_ids.indexOf(tokenId)] ?? "",
-    color: PIN_COLORS[S.pins.length % PIN_COLORS.length],
+    colorIdx: S.pins.length,
     ranks: null,
     loading: true,
   };
@@ -227,7 +268,7 @@ function renderPrediction() {
 function renderPins() {
   $("pins").innerHTML = S.pins.map((p, i) =>
     `<span class="pin-chip ${p.loading ? "loading" : ""} ${i === S.activePin ? "active-pin" : ""}"` +
-    ` style="border-color:${p.color};color:${p.color}" data-pin="${i}">` +
+    ` style="border-color:${pinColor(p)};color:${pinColor(p)}" data-pin="${i}">` +
     `${esc(showTok(p.text))}${p.loading ? " …" : ""}` +
     `<button class="x" data-unpin="${i}" aria-label="unpin">×</button></span>`
   ).join("");
@@ -235,10 +276,9 @@ function renderPins() {
 
 function renderMeta() {
   const r = S.resp;
-  const t = r.timing_ms;
+  const secs = ((r.client_ms ?? r.timing_ms.total) / 1000).toFixed(1);
   $("meta").textContent =
-    `${r.prompt_tokens.length} tokens${r.truncated ? " (truncated!)" : ""}\n` +
-    `forward ${t.forward} ms · readout ${t.readout} ms\nid ${r.request_id}`;
+    `${r.prompt_tokens.length} tokens${r.truncated ? " (truncated)" : ""} · ${secs} s`;
 }
 
 function setGridMode(m) {
@@ -275,9 +315,8 @@ function renderGrid() {
       const title = esc(cellTitle(L, p));
       if (usePin) {
         const rank = rankAt(pin, L, p);
-        const [bg, dim] = rankStyle(rank);
-        cells.push(`<td class="cell${selCol}${selected}${dim ? " rank-dim" : ""}" data-l="${L}" data-p="${p}"` +
-          ` style="background-color:${bg}" title="${title}\nrank ${rank}">${fmtRank(rank)}</td>`);
+        cells.push(`<td class="cell ${rankClass(rank)}${selCol}${selected}" data-l="${L}" data-p="${p}"` +
+          ` title="${title}\nrank ${rank}">${fmtRank(rank)}</td>`);
       } else {
         const [tk] = topkAt(L, p);
         cells.push(`<td class="cell${selCol}${selected}" data-l="${L}" data-p="${p}" title="${title}">` +
@@ -291,6 +330,7 @@ function renderGrid() {
     `<td class="axis-tok${p === S.sel.pos ? " sel-col" : ""}" data-axis="${p}" title="position ${p}">` +
     `${esc(showTok(r.strings[si]))}</td>`).join("");
   rows.push(`<tr class="axis-row"><th class="layer-label">prompt →</th>${axis}</tr>`);
+  $("grid").style.minWidth = `${96 + 80 * P}px`;
   $("grid").innerHTML = rows.join("");
 }
 
@@ -336,25 +376,32 @@ function renderByPos() {
 
 // ---------- charts ----------
 
-const CH = { w: 460, h: 170, l: 34, r: 8, t: 10, b: 22 };
+const CH = { h: 170, l: 34, r: 8, t: 10, b: 22 };
 const RMAX = Math.log10(160000);
 
-function chartFrame(xTicks, xLabel, bandX) {
-  const iw = CH.w - CH.l - CH.r, ih = CH.h - CH.t - CH.b;
+// viewBox width tracks the rendered width so nothing stretches.
+function chartWidth(svg) {
+  const w = Math.max(Math.round(svg.clientWidth) || 460, 240);
+  svg.setAttribute("viewBox", `0 0 ${w} ${CH.h}`);
+  return w;
+}
+
+function chartFrame(w, xTicks, xLabel, bandX) {
+  const ih = CH.h - CH.t - CH.b;
   const parts = [];
   if (bandX) {
     parts.push(`<rect class="bandrect" x="${bandX[0]}" y="${CH.t}" width="${bandX[1] - bandX[0]}" height="${ih}"/>`);
   }
   for (const rv of [1, 10, 100, 1000, 10000, 100000]) {
     const y = CH.t + ih - (Math.log10(rv) / RMAX) * ih;
-    parts.push(`<line class="gridline" x1="${CH.l}" y1="${y}" x2="${CH.w - CH.r}" y2="${y}"/>`);
+    parts.push(`<line class="gridline" x1="${CH.l}" y1="${y}" x2="${w - CH.r}" y2="${y}"/>`);
     parts.push(`<text x="${CH.l - 4}" y="${y + 3}" text-anchor="end">${rv >= 1000 ? rv / 1000 + "k" : rv}</text>`);
   }
   for (const [xv, lbl] of xTicks) {
-    if (xv > CH.w - 60) continue; // keep clear of the axis label
+    if (xv > w - 60) continue; // keep clear of the axis label
     parts.push(`<text x="${xv}" y="${CH.h - 8}" text-anchor="middle">${lbl}</text>`);
   }
-  parts.push(`<text x="${CH.w - CH.r}" y="${CH.h - 8}" text-anchor="end">${xLabel}</text>`);
+  parts.push(`<text x="${w - CH.r}" y="${CH.h - 8}" text-anchor="end">${xLabel}</text>`);
   return parts;
 }
 
@@ -367,19 +414,20 @@ function renderCharts() {
   const r = S.resp;
   if (!r) return;
   const ready = S.pins.filter((p) => p.ranks);
-  const iw = CH.w - CH.l - CH.r;
 
   // rank vs layer at selected position
   {
+    const w = chartWidth($("chart-layer"));
+    const iw = w - CH.l - CH.r;
     const n = r.n_layers;
     const x = (L) => CH.l + (L / (n - 1)) * iw;
     const [w0, w1] = r.workspace_band;
     const ticks = [0, 8, 16, 24, 31].map((L) => [x(L), `L${L}`]);
-    const parts = chartFrame(ticks, "layer →", [x(w0), x(w1)]);
+    const parts = chartFrame(w, ticks, "layer →", [x(w0), x(w1)]);
     for (const pin of ready) {
       const pts = r.lens_layers.map((L, li) => `${x(L)},${rankY(rankAt(pin, L, S.sel.pos))}`);
       pts.push(`${x(n - 1)},${rankY(pin.ranks.model_ranks[S.sel.pos])}`);
-      parts.push(`<polyline class="rankline" stroke="${pin.color}" points="${pts.join(" ")}"/>`);
+      parts.push(`<polyline class="rankline" stroke="${pinColor(pin)}" points="${pts.join(" ")}"/>`);
     }
     if (!ready.length) parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">pin a token to trace its rank across layers</text>`);
     $("chart-layer").innerHTML = parts.join("");
@@ -387,16 +435,18 @@ function renderCharts() {
 
   // rank vs position at selected layer
   {
+    const w = chartWidth($("chart-pos"));
+    const iw = w - CH.l - CH.r;
     const P = r.prompt_tokens.length;
     const x = (p) => CH.l + (P > 1 ? (p / (P - 1)) * iw : iw / 2);
     const step = Math.max(1, Math.round(P / 6));
     const ticks = [];
     for (let p = 0; p < P; p += step) ticks.push([x(p), String(p)]);
-    const parts = chartFrame(ticks, "position →", null);
+    const parts = chartFrame(w, ticks, "position →", null);
     for (const pin of ready) {
       const pts = [];
       for (let p = 0; p < P; p++) pts.push(`${x(p)},${rankY(rankAt(pin, S.sel.layer, p))}`);
-      parts.push(`<polyline class="rankline" stroke="${pin.color}" points="${pts.join(" ")}"/>`);
+      parts.push(`<polyline class="rankline" stroke="${pinColor(pin)}" points="${pts.join(" ")}"/>`);
     }
     if (!ready.length) parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">pin a token to trace its rank across positions</text>`);
     $("chart-pos").innerHTML = parts.join("");
@@ -466,6 +516,12 @@ $("pins").addEventListener("click", (e) => {
     renderPins();
     if (S.gridMode === "rank") renderGrid();
   }
+});
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (S.resp) renderCharts(); }, 150);
 });
 
 $("pin-form").addEventListener("submit", (e) => {

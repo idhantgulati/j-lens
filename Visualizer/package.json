@@ -1,0 +1,10 @@
+{
+  "name": "j-lens-visualizer",
+  "private": true,
+  "scripts": {
+    "dev": "serve frontend -l 3000"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}

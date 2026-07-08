@@ -4,25 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J-Lens Visualizer · Qwen3.5-4B</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650&display=swap">
+<script>
+(function () {
+  var t = localStorage.getItem("jlens-theme");
+  if (t !== "light" && t !== "dark")
+    t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128301;</text></svg>">
+<script>
+window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu: false } };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
 
 <header>
   <div class="title-block">
     <h1>J-Lens Visualizer</h1>
-    <p class="subtitle">Jacobian-lens readouts, layer by layer &middot; Qwen3.5-4B</p>
+    <p class="subtitle">What a language model is holding at every layer &middot; Qwen3.5-4B</p>
   </div>
-  <div id="status-badge" class="badge badge-cold" title="The GPU container scales to zero when idle; the first request wakes it.">connecting&hellip;</div>
+  <div class="header-side">
+    <div id="status" class="status" title="The GPU falls asleep when idle; the first request wakes it.">
+      <span class="status-dot"></span><span id="status-text">connecting&hellip;</span>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" aria-label="toggle dark mode">dark mode</button>
+  </div>
 </header>
 
 <section class="prompt-row">
   <textarea id="prompt" rows="2" spellcheck="false"
-    placeholder="Type a prompt — the lens shows what the model is holding at every layer&hellip;"></textarea>
+    placeholder="Type a prompt &mdash; the lens shows what the model is thinking at every layer&hellip;"></textarea>
   <div class="prompt-controls">
     <button id="analyze-btn">Analyze</button>
     <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
@@ -32,8 +46,10 @@
   </div>
 </section>
 
+<p id="patience-note" class="patience hidden"></p>
+
 <section id="examples" class="examples">
-  <span class="examples-label">try:</span>
+  <span class="examples-label">try one:</span>
   <button class="example">Fact: The currency used in the country shaped like a boot is the</button>
   <button class="example">The color of the planet fourth from the sun is</button>
   <button class="example">The capital of the state containing Dallas is</button>
@@ -50,18 +66,14 @@
       <div id="prediction-list" class="prediction-list"></div>
     </div>
     <div class="card" id="pins-card">
-      <div class="card-label">pinned tokens <span class="hint">&middot; click any token below to pin; pins map a token&rsquo;s rank across every layer &times; position</span></div>
+      <div class="card-label">pinned tokens <span class="hint">&mdash; click any token below to trace it across every layer</span></div>
       <div class="pins-line">
         <div id="pins" class="pins"></div>
-        <form id="pin-form"><input id="pin-input" placeholder="pin free text&hellip;" autocomplete="off"><button type="submit" class="ghost-btn">pin</button></form>
+        <form id="pin-form"><input id="pin-input" placeholder="pin any text&hellip;" autocomplete="off"><button type="submit" class="ghost-btn">pin</button></form>
       </div>
       <div id="rank-legend" class="rank-legend hidden">
-        <span>rank</span><i style="background:var(--r1)"></i>1<i style="background:var(--r10)"></i>10<i style="background:var(--r100)"></i>100<i style="background:var(--r1k)"></i>1k<i style="background:var(--r10k)"></i>10k+
+        <span>rank</span><i class="l-r1"></i>1<i class="l-r10"></i>10<i class="l-r100"></i>100<i class="l-r1k"></i>1k<i class="l-r10k"></i>10k+
       </div>
-    </div>
-    <div class="card" id="meta-card">
-      <div class="card-label">request</div>
-      <div id="meta" class="meta"></div>
     </div>
   </div>
 
@@ -72,7 +84,7 @@
         <button class="seg-btn active" data-grid="argmax" role="tab">argmax token</button>
         <button class="seg-btn" data-grid="rank" role="tab" disabled title="pin a token first">pin rank heatmap</button>
       </div>
-      <p class="panel-hint">click a cell to select its layer + position &middot; hover for top-5</p>
+      <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-5</p>
     </div>
     <div class="grid-scroll"><table id="grid"></table></div>
   </div>
@@ -81,12 +93,12 @@
     <div class="panel" id="by-layer-panel">
       <div class="panel-head"><h2 id="by-layer-title">by layer</h2><p class="panel-hint">top-k at the selected position, every layer</p></div>
       <div id="by-layer" class="stack"></div>
-      <svg id="chart-layer" class="chart" viewBox="0 0 460 170" preserveAspectRatio="none" role="img" aria-label="pinned token rank vs layer"></svg>
+      <svg id="chart-layer" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs layer"></svg>
     </div>
     <div class="panel" id="by-pos-panel">
       <div class="panel-head"><h2 id="by-pos-title">by position</h2><p class="panel-hint">top-k at the selected layer, every position</p></div>
       <div id="by-pos" class="stack"></div>
-      <svg id="chart-pos" class="chart" viewBox="0 0 460 170" preserveAspectRatio="none" role="img" aria-label="pinned token rank vs position"></svg>
+      <svg id="chart-pos" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs position"></svg>
     </div>
   </div>
 
@@ -96,13 +108,29 @@
   <details>
     <summary>What am I looking at?</summary>
     <div class="about">
-      <p>The <strong>Jacobian lens</strong> (<a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Gurnee et&nbsp;al.&nbsp;2026</a>) reads a hidden activation <code>h<sub>&#8467;</sub></code> at layer &#8467; by transporting it into the final-layer basis with the corpus-averaged Jacobian <code>J<sub>&#8467;</sub></code> and decoding with the model&rsquo;s own unembedding: <code>lens<sub>&#8467;</sub>(h) = unembed(J<sub>&#8467;</sub>h)</code>. The tokens it surfaces are what the model is <em>verbalizably holding</em> at that depth &mdash; often intermediate concepts that are neither the input nor the next token.</p>
-      <p>The <strong>logit lens</strong> toggle skips the transport (<code>unembed(h)</code> directly) &mdash; the classic baseline. Comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
+      <p>The <strong>Jacobian lens</strong> (<a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Gurnee et&nbsp;al.&nbsp;2026</a>) reads a hidden activation \(h_\ell\) at layer \(\ell\) by transporting it into the final-layer basis with the corpus-averaged Jacobian \(J_\ell\) and decoding with the model&rsquo;s own unembedding: \(\mathrm{lens}_\ell(h) = \mathrm{unembed}(J_\ell\, h)\). The tokens it surfaces are what the model is <em>verbalizably holding</em> at that depth &mdash; often intermediate concepts that are neither the input nor the next token.</p>
+      <p>The <strong>logit lens</strong> toggle skips the transport (\(\mathrm{unembed}(h)\) directly) &mdash; the classic baseline. Comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
       <p>Row shading marks the three regions of the network: early <strong>sensory</strong> layers (readouts are noisy and largely uninterpretable &mdash; greyed out), the middle <strong>workspace</strong> band (layers 12&ndash;29 on this model &mdash; where the interpretable action is), and the final <strong>motor</strong> layers, where the readout collapses onto the actual next-token prediction. The top row is the model&rsquo;s real output distribution.</p>
       <p><strong>Pinning</strong> a token colors every (layer&nbsp;&times;&nbsp;position) cell by that token&rsquo;s rank in the readout (log scale: 1 &middot; 10 &middot; 100 &middot; 1k+), and draws its rank trajectory in the charts &mdash; watch a concept surface in the workspace and dissolve into the motor layers.</p>
-      <p class="fine">Model: Qwen3.5-4B &middot; lens: <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a> (n=1000, wikitext) &middot; backend: Modal L40S, scales to zero when idle &middot; prompts are logged for usage stats.</p>
     </div>
   </details>
+
+  <section class="references">
+    <h3>References</h3>
+    <ul>
+      <li>Gurnee et&nbsp;al. (2026). &ldquo;Verbalizable Representations Form a Global Workspace in Language Models.&rdquo; <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Transformer Circuits Thread</a>. The Jacobian lens (J-lens) this site is built around.</li>
+      <li>nostalgebraist (2020). &ldquo;interpreting GPT: the logit lens.&rdquo; <a href="https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens" target="_blank" rel="noopener">LessWrong</a>. The baseline the toggle compares against.</li>
+      <li>Jacobian-lens weights: <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a> (n&nbsp;=&nbsp;1000, WikiText) on Hugging&nbsp;Face.</li>
+      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a>, Qwen team.</li>
+      <li>Code for this site and the lens reimplementation: <a href="https://github.com/idhantgulati/j-lens" target="_blank" rel="noopener">github.com/idhantgulati/j-lens</a>.</li>
+    </ul>
+  </section>
+
+  <p class="colophon">
+    Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant Gulati</a>
+    &middot; compute for this demo is generously provided by <a href="https://modal.com" target="_blank" rel="noopener">Modal</a>
+    &middot; prompts are logged for usage stats.
+  </p>
 </footer>
 
 <script src="config.js"></script>
