@@ -1,11 +1,17 @@
 {
   "name": "j-lens-visualizer",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "serve frontend -l 3000"
+    "dev": "serve frontend -l 3000",
+    "lint": "eslint -c frontend/eslint.config.js frontend",
+    "check": "node --check frontend/app.js"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
     "serve": "^14.2.4"
   },
   "dependencies": {

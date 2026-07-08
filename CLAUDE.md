@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A minimal, faithful reimplementation of the Jacobian lens and J-space methods from "Verbalizable Representations Form a Global Workspace in Language Models" (Gurnee et al., 2026, transformer-circuits.pub/2026/workspace), on Qwen3.5-4B. Nothing beyond the paper's core methods — no packaging, no CLI, no config system. Deliberately out of scope: tuned-lens baseline, SAE/κ analyses, broadcast-head analyses, template/oracle lens, ablation task battery.
+A minimal, faithful reimplementation of the Jacobian lens and J-space methods from "Verbalizable Representations Form a Global Workspace in Language Models" (Gurnee et al., 2026, transformer-circuits.pub/2026/workspace), on Qwen3.5-4B, plus a deployed web visualizer (`visualizer/`). The research code has nothing beyond the paper's core methods — no packaging, no CLI, no config system. Deliberately out of scope: tuned-lens baseline, SAE/κ analyses, broadcast-head analyses, template/oracle lens, ablation task battery.
 
 The untracked `knowledge/` directory (present locally, gitignored) is the authoritative spec: `knowledge/implementation.md` has the full design, empirical bring-up findings, and verified results; `knowledge/paper-notes.md` has paper notes. Read `implementation.md` before making changes. `paper/` holds a local copy of the paper itself.
 
@@ -24,6 +24,16 @@ Fitting and evaluation need a GPU. Dev flow: write code locally → commit and p
 
 Model access is Qwen-specific, no layout autodetection: blocks at `model.model.layers`, final norm `model.model.norm`, unembed = `lm_head(norm(·))`.
 
+## Visualizer (`visualizer/`)
+
+Interactive per-layer readout explorer (paper's Figure 5 plus chat mode, generation, pinned-token rank heatmaps, J-Space decomposition, swap/steer interventions). `visualizer/README.md` is the authoritative doc — architecture, full API schema, deploy, Supabase logging, cost guardrails. Live: frontend https://j-lens-visualizer.vercel.app, API https://order-evaluation--jlens-api.modal.run.
+
+- **Frontend** (`visualizer/frontend/`) — static vanilla JS, no framework, no build step: `index.html` + `app.js` + `style.css`; the API base URL lives in `config.js`. Local dev: `cd visualizer && npm run dev` (serves on :3000 against the live Modal API).
+- **Backend** (`visualizer/backend/app.py`) — Modal GPU class (L40S) exposing FastAPI: loads Qwen3.5-4B bf16 + the released n=1000 lens once per container, scales to zero after 5 idle min. Endpoints: `/api/analyze` (per-layer top-k), `/api/rank` (pinned-token ranks; activations LRU-cached per `request_id`), `/api/intervene` (swap/steer), plus `/healthz` and `/warmup` (frontend pings it on page load to hide cold start).
+- **Deploy**: backend `modal deploy visualizer/backend/app.py` from the repo root (the image ships root-level `jlens.py`); frontend `cd visualizer/frontend && vercel deploy --prod --yes`. Both also push-to-deploy on `main`: Vercel is git-connected (root dir `visualizer/frontend`), and `.github/workflows/deploy-backend.yml` redeploys Modal when `visualizer/backend/**` or `jlens.py` change — so **editing `jlens.py` redeploys the backend**.
+- Smoke test after backend changes: `curl $API/warmup` then POST `/api/analyze` with a short prompt (see visualizer/README.md).
+- **Before every commit that touches the visualizer, bump the version number** in both places it appears: the footer `version-line` in `visualizer/frontend/index.html` (also update its "last updated" date) and `version` in `visualizer/package.json` — keep the two in sync.
+
 ## Non-obvious constraints (learned during bring-up; details in knowledge/implementation.md)
 
 - **Swap is implemented as a bisector reflection**, not the paper's pinv-coordinate form: the pinv version is ill-conditioned at 4B scale (same-category lens vectors have cosine 0.5–0.75). For unit vectors the reflection $h - 2(h\cdot\hat u)\hat u$, $\hat u \propto \hat v_s - \hat v_t$, is the identical operation. With this form α=1 is the exact swap and α=2 overshoots — don't "double strength."
@@ -36,5 +46,5 @@ Model access is Qwen-specific, no layout autodetection: blocks at `model.model.l
 
 ## Repo hygiene
 
-- Tracked artifacts are only the notebook, the three modules, and README. `paper/`, `knowledge/`, `data/`, `*.pt` stay untracked.
+- Tracked artifacts: the notebook, the three modules, README, and `visualizer/` (frontend, backend, its README, deploy workflow). `paper/`, `knowledge/`, `data/`, `*.pt`, and `visualizer/.env` (Supabase keys) stay untracked.
 - Commits: small, plain messages ("add fitting", "notebook: swap demo"); no attribution footers.

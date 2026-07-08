@@ -85,6 +85,15 @@ function layerLabel(layer) {
   if (layer === n - 1) return `L${layer} · output`;
   return `L${layer}`;
 }
+function scrollStackToRow(stackEl, rowEl) {
+  if (!stackEl || !rowEl) return;
+  const rowTop = rowEl.offsetTop;
+  const rowBottom = rowTop + rowEl.offsetHeight;
+  const viewTop = stackEl.scrollTop;
+  const viewBottom = viewTop + stackEl.clientHeight;
+  if (rowTop < viewTop) stackEl.scrollTop = rowTop;
+  else if (rowBottom > viewBottom) stackEl.scrollTop = rowBottom - stackEl.clientHeight;
+}
 
 // Top-k [strIdx...] + probs at (layer, pos) for the current mode; layer n-1 = model.
 function topkAt(layer, pos) {
@@ -125,7 +134,7 @@ async function warmup() {
   setStatus("warming", "starting up");
   const slow = setTimeout(() => {
     setStatus("warming", "warming up");
-    setPatience("The GPU behind this page sleeps when nobody is around, and it takes about a minute to wake. Feel free to write your prompt in the meantime — it will run as soon as things are ready.");
+    setPatience("The GPU behind this page sleeps when idle and takes about a minute to wake. Feel free to type your prompt in the meantime.");
   }, 2500);
   try {
     const r = await fetch(`${API}/warmup`);
@@ -173,7 +182,8 @@ async function analyze() {
     S.gridMode = "argmax";
     const P = S.resp.prompt_tokens.length;
     const [w0, w1] = S.resp.workspace_band;
-    S.sel = { layer: Math.round((w0 + w1) / 2), pos: P - 1 };
+    const hasGen = S.resp.gen_start !== undefined && S.resp.gen_start < P;
+    S.sel = { layer: Math.round((w0 + w1) / 2), pos: hasGen ? S.resp.gen_start : P - 1 };
     $("results").classList.remove("hidden");
     $("examples").classList.add("hidden");
     renderAll();
@@ -187,7 +197,7 @@ async function analyze() {
     clearTimeout(slow);
     setPatience(null);
     btn.disabled = false;
-    btn.textContent = "Analyze";
+    btn.innerHTML = 'Analyze <kbd class="key-hint">⏎</kbd>';
   }
 }
 
@@ -317,12 +327,14 @@ function renderCompletion() {
 
 function renderPrediction() {
   const r = S.resp;
-  const P = r.prompt_tokens.length;
-  $("prediction-label").textContent = r.completion
-    ? "model prediction · token after the output" : "model prediction · next token";
-  $("prediction-list").innerHTML = r.model.topk[P - 1].slice(0, 5).map((si, i) =>
+  const pos = S.sel.pos;
+  const isLast = pos === r.prompt_tokens.length - 1;
+  $("prediction-label").textContent = isLast && r.completion
+    ? "model prediction · token after the output"
+    : `model prediction · next token after pos ${pos}`;
+  $("prediction-list").innerHTML = r.model.topk[pos].slice(0, 5).map((si, i) =>
     `<button class="pred" data-si="${si}" title="pin this token">` +
-    `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[P - 1][i])}</span></button>`
+    `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[pos][i])}</span></button>`
   ).join("");
 }
 
@@ -335,6 +347,11 @@ function renderJSpace() {
   const L = r.lens_layers.length;
   const P = r.prompt_tokens.length;
   const [w0, w1] = r.workspace_band;
+  const wsIndices = [];
+  for (let li = 0; li < L; li++) {
+    const layer = r.lens_layers[li];
+    if (layer >= w0 && layer <= w1) wsIndices.push(li);
+  }
   const stats = new Map(); // strIdx -> {total, perLayer: Int32Array}
   for (let li = 0; li < L; li++) {
     if (r.lens_layers[li] < w0 || r.lens_layers[li] > w1) continue; // workspace cells only
@@ -355,11 +372,27 @@ function renderJSpace() {
   const rows = [...stats.entries()]
     .filter(([si]) => showAll || isContent(si))
     .sort((a, b) => b[1].total - a[1].total).slice(0, 40);
-  const maxCell = Math.max(1, ...rows.map(([, s]) => Math.max(...s.perLayer)));
-  $("jspace").innerHTML = rows.map(([si, s]) => {
-    const strip = Array.from(s.perLayer, (c, li) =>
-      `<i style="opacity:${c ? (0.15 + 0.85 * c / maxCell).toFixed(2) : 0}" title="L${r.lens_layers[li]}: ${c}×"></i>`
-    ).join("");
+  const maxCell = Math.max(1, ...rows.map(([, s]) =>
+    Math.max(0, ...wsIndices.map((li) => s.perLayer[li]))));
+  const stripCell = (c, li) => {
+    const layer = r.lens_layers[li];
+    if (!c) return `<i class="js-cell is-zero" title="L${layer}: not in top-10"></i>`;
+    const op = (0.25 + 0.75 * c / maxCell).toFixed(2);
+    return `<i class="js-cell" style="--cell-op:${op}" title="L${layer}: ${c}×"></i>`;
+  };
+  const legend = wsIndices.length ? `<div class="js-strip-legend" aria-hidden="true">` +
+    `<span class="js-tok js-tok-ghost"></span><span class="js-count"></span>` +
+    `<span class="js-strip">` +
+    wsIndices.map((li) => {
+      const layer = r.lens_layers[li];
+      const edge = layer === w0 || layer === w1;
+      const tick = edge || layer % 4 === 0;
+      return `<i class="js-cell is-label${tick ? " has-label" : ""}" title="L${layer}">` +
+        `${tick ? `<span>L${layer}</span>` : ""}</i>`;
+    }).join("") +
+    `</span><span class="js-actions"></span></div>` : "";
+  $("jspace").innerHTML = legend + rows.map(([si, s]) => {
+    const strip = wsIndices.map((li) => stripCell(s.perLayer[li], li)).join("");
     return `<div class="js-row">` +
       `<button class="tok js-tok" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">${esc(showTok(r.strings[si]))}</button>` +
       `<span class="js-count">${s.total}</span>` +
@@ -383,8 +416,11 @@ function renderPins() {
 function renderMeta() {
   const r = S.resp;
   const secs = ((r.client_ms ?? r.timing_ms.total) / 1000).toFixed(1);
-  $("meta").textContent =
-    `${r.prompt_tokens.length} tokens${r.truncated ? " (truncated)" : ""} · ${secs} s`;
+  const hasGen = r.gen_start !== undefined && r.gen_start < r.prompt_tokens.length;
+  const tokCount = hasGen
+    ? `${r.gen_start} prompt + ${r.prompt_tokens.length - r.gen_start} generated`
+    : `${r.prompt_tokens.length} tokens`;
+  $("meta").textContent = `${tokCount}${r.truncated ? " (truncated)" : ""} · ${secs} s`;
 }
 
 function setGridMode(m) {
@@ -441,44 +477,62 @@ function renderGrid() {
   $("grid").innerHTML = rows.join("");
 }
 
-function renderByLayer() {
+// One top-k row as grid-style <td> cells (rank order left to right).
+function tokCells(tk, pr) {
+  const r = S.resp;
+  return tk.map((si, i) =>
+    `<td class="tok-cell${i === 0 ? " rank1" : ""}" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">` +
+    `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></td>`).join("");
+}
+
+function stackTable(rows, k) {
+  return `<table class="stack-table" style="min-width:${96 + 104 * k}px">${rows.join("")}</table>`;
+}
+
+function stackTableByPos(rows, k) {
+  const head = `<tr class="stack-head">` +
+    `<th class="pos-label">pos</th><th class="tok-label">token</th>` +
+    `<th class="stack-head-rest" colspan="${k}"></th></tr>`;
+  return `<table class="stack-table by-pos-table" style="min-width:${48 + 104 + 104 * k}px">` +
+    head + rows.join("") + `</table>`;
+}
+
+function renderByLayer(autoScroll = false) {
   const r = S.resp;
   const pos = S.sel.pos;
   $("by-layer-title").textContent =
     `by layer · pos ${pos} ${JSON.stringify(r.strings[r.prompt_tokens[pos]])}`;
   const layers = [r.n_layers - 1, ...[...r.lens_layers].reverse()];
-  $("by-layer").innerHTML = layers.map((L) => {
+  let k = 0;
+  const rows = layers.map((L) => {
     const [tk, pr] = topkAt(L, pos);
-    const band = bandClass(L) === "row-workspace" ? "in-workspace" : bandClass(L) === "row-motor" ? "in-motor" : "";
-    const toks = tk.map((si, i) =>
-      `<button class="tok${i === 0 ? " rank1" : ""}" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">` +
-      `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></button>`).join("");
-    return `<div class="stack-row ${band}${L === S.sel.layer ? " is-selected" : ""}">` +
-      `<span class="rl" data-layer="${L}" title="select this layer">${layerLabel(L)}</span>` +
-      `<span class="toks">${toks}</span></div>`;
-  }).join("");
+    k = Math.max(k, tk.length);
+    return `<tr class="${bandClass(L)}${L === S.sel.layer ? " is-selected" : ""}">` +
+      `<th class="layer-label" data-layer="${L}" title="select this layer">${layerLabel(L)}</th>${tokCells(tk, pr)}</tr>`;
+  });
+  $("by-layer").innerHTML = stackTable(rows, k);
   const sel = $("by-layer").querySelector(".is-selected");
-  if (sel) sel.scrollIntoView({ block: "nearest" });
+  if (sel && autoScroll) scrollStackToRow($("by-layer"), sel);
 }
 
-function renderByPos() {
+function renderByPos(autoScroll = false) {
   const r = S.resp;
   const L = S.sel.layer;
   const P = r.prompt_tokens.length;
   $("by-pos-title").textContent = `by position · ${layerLabel(L)}`;
   const rows = [];
+  let k = 0;
   for (let p = 0; p < P; p++) {
     const [tk, pr] = topkAt(L, p);
-    const toks = tk.map((si, i) =>
-      `<button class="tok${i === 0 ? " rank1" : ""}" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">` +
-      `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></button>`).join("");
-    rows.push(`<div class="stack-row${p === S.sel.pos ? " is-selected" : ""}${isGen(p) ? " is-gen-row" : ""}">` +
-      `<span class="rl" data-pos="${p}" title="select this position${isGen(p) ? " (generated token)" : ""}">${p} ${esc(showTok(r.strings[r.prompt_tokens[p]]).slice(0, 8))}</span>` +
-      `<span class="toks">${toks}</span></div>`);
+    k = Math.max(k, tk.length);
+    rows.push(`<tr class="${p === S.sel.pos ? "is-selected" : ""}${isGen(p) ? " is-gen-row" : ""}">` +
+      `<th class="pos-label" data-pos="${p}" title="position ${p}">${p}</th>` +
+      `<th class="tok-label" data-pos="${p}" title="select position ${p}${isGen(p) ? " (generated token)" : ""}">` +
+      `${esc(showTok(r.strings[r.prompt_tokens[p]]))}</th>${tokCells(tk, pr)}</tr>`);
   }
-  $("by-pos").innerHTML = rows.join("");
+  $("by-pos").innerHTML = stackTableByPos(rows, k);
   const sel = $("by-pos").querySelector(".is-selected");
-  if (sel) sel.scrollIntoView({ block: "nearest" });
+  if (sel && autoScroll) scrollStackToRow($("by-pos"), sel);
 }
 
 // ---------- charts ----------
@@ -532,7 +586,7 @@ function renderCharts() {
     const ticks = [0, 8, 16, 24, 31].map((L) => [x(L), `L${L}`]);
     const parts = chartFrame(w, ticks, "layer →", [x(w0), x(w1)]);
     for (const pin of ready) {
-      const pts = r.lens_layers.map((L, li) => `${x(L)},${rankY(rankAt(pin, L, S.sel.pos))}`);
+      const pts = r.lens_layers.map((L) => `${x(L)},${rankY(rankAt(pin, L, S.sel.pos))}`);
       pts.push(`${x(n - 1)},${rankY(pin.ranks.model_ranks[S.sel.pos])}`);
       parts.push(`<polyline class="rankline" stroke="${pinColor(pin)}" points="${pts.join(" ")}"/>`);
     }
@@ -566,9 +620,10 @@ function select({ layer = null, pos = null }) {
   if (layer !== null) S.sel.layer = layer;
   if (pos !== null) S.sel.pos = pos;
   renderCompletion(); // keep the transcript's selected-token highlight in sync
+  renderPrediction();
   renderGrid();
-  renderByLayer();
-  renderByPos();
+  renderByLayer(true);
+  renderByPos(true);
   renderCharts();
 }
 
@@ -576,7 +631,7 @@ function select({ layer = null, pos = null }) {
 
 $("analyze-btn").addEventListener("click", analyze);
 $("prompt").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze();
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); analyze(); }
 });
 
 document.querySelectorAll("#examples .example").forEach((b) =>
@@ -713,11 +768,12 @@ $("grid").addEventListener("click", (e) => {
 
 for (const id of ["by-layer", "by-pos"]) {
   $(id).addEventListener("click", (e) => {
-    const tok = e.target.closest(".tok");
+    const tok = e.target.closest("td.tok-cell");
     if (tok) return pinToken({ tokenId: S.resp.token_ids[+tok.dataset.si] });
-    const rl = e.target.closest(".rl");
+    const rl = e.target.closest("th.layer-label");
     if (rl && rl.dataset.layer !== undefined) return select({ layer: +rl.dataset.layer });
-    if (rl && rl.dataset.pos !== undefined) return select({ pos: +rl.dataset.pos });
+    const posTh = e.target.closest("th.pos-label, th.tok-label");
+    if (posTh && posTh.dataset.pos !== undefined) return select({ pos: +posTh.dataset.pos });
   });
 }
 

@@ -12,6 +12,7 @@
   document.documentElement.dataset.theme = t;
 })();
 </script>
+<link rel="preload" href="fonts/Satoshi-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 {
@@ -30,8 +31,11 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
 <header>
   <div class="title-block">
-    <h1>J-Lens Visualizer</h1>
-    <p class="subtitle">What a language model is holding at every layer &middot; Qwen3.5-4B</p>
+    <h1><span class="title-mark">J-Lens</span> Visualizer</h1>
+    <div class="subtitle-row">
+      <p class="subtitle">What a language model is holding at every layer</p>
+      <span class="model-badge">Qwen3.5-4B</span>
+    </div>
   </div>
   <div class="header-side">
     <div id="status" class="status" title="The GPU falls asleep when idle; the first request wakes it.">
@@ -47,18 +51,6 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     </button>
   </div>
 </header>
-
-<section class="prompt-row">
-  <textarea id="prompt" rows="2" spellcheck="false"
-    placeholder="Type a prompt &mdash; the lens shows what the model is thinking at every layer&hellip;"></textarea>
-  <div class="prompt-controls">
-    <button id="analyze-btn">Analyze</button>
-    <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
-      <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
-      <button class="seg-btn" data-mode="logit_lens" role="tab">Logit lens</button>
-    </div>
-  </div>
-</section>
 
 <section class="run-config">
   <div class="seg small" id="chat-toggle" role="tablist" aria-label="Prompt format">
@@ -78,12 +70,24 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 </section>
 
 <section id="advanced" class="advanced hidden">
-  <label class="adv-field">system prompt <span class="adv-hint">chat mode only &mdash; sets the assistant&rsquo;s instructions</span>
+  <label class="adv-field">system prompt <span class="adv-hint">chat mode only</span>
     <input id="system-prompt" placeholder="e.g. Answer in one word." autocomplete="off">
   </label>
-  <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only &mdash; the reply is forced to start with this</span>
+  <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only &mdash; the model&rsquo;s reply starts with this</span>
     <input id="prefill" placeholder='e.g. "The answer is' autocomplete="off">
   </label>
+</section>
+
+<section class="prompt-row">
+  <textarea id="prompt" rows="2" spellcheck="false"
+    placeholder="Type a prompt &mdash; the lens shows what the model is thinking at every layer&hellip;"></textarea>
+  <div class="prompt-controls">
+    <button id="analyze-btn" title="Return runs &middot; Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
+    <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
+      <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
+      <button class="seg-btn" data-mode="logit_lens" role="tab">Logit lens</button>
+    </div>
+  </div>
 </section>
 
 <p id="patience-note" class="patience hidden"></p>
@@ -129,7 +133,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
       <label class="cfg-label js-filter" title="Template tokens (&lt;|im_end|&gt;, &lt;/think&gt;) and pure-punctuation tokens also live in the workspace &mdash; often marking turn structure and formatting state">
         <input type="checkbox" id="js-show-all"> include special &amp; punctuation tokens
       </label>
-      <p class="panel-hint">every token in the top-10 readout of any workspace cell, ranked by how often it appears &middot; click to pin &middot; steer or swap to intervene</p>
+      <p class="panel-hint">every token in any workspace cell&rsquo;s top-10 readout, ranked by how often it appears &middot; click a token to pin it &middot; steer or swap to intervene</p>
     </div>
     <div id="jspace" class="jspace"></div>
   </div>
@@ -157,7 +161,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
         </label>
         <button id="iv-run">Run intervention</button>
       </div>
-      <p class="panel-hint" id="iv-note">Words are matched in all single-token surface forms (&ldquo;&nbsp;tennis&rdquo;, &ldquo;&nbsp;Tennis&rdquo;, &hellip;). Layers 12&ndash;28 are the workspace band; swap is the exact coordinate exchange (&alpha;=1). Steer strength is in units of the layer&rsquo;s mean residual norm and has a sharp threshold on this 4B model &mdash; ~0.015 does nothing, ~0.02 takes over the output; negative values suppress. Swaps redirect the answer only sometimes at 4B scale (the paper reports ~13&ndash;18%) &mdash; often they just knock the source concept out.</p>
+      <p class="panel-hint" id="iv-note">Words are matched in all single-token surface forms (&ldquo;&nbsp;tennis&rdquo;, &ldquo;&nbsp;Tennis&rdquo;, &hellip;), and layers 12&ndash;28 are the workspace band. Steer strength has a sharp threshold on this model &mdash; ~0.015 does nothing, ~0.02 takes over the output; negative values suppress. Swaps only sometimes redirect the answer at 4B scale (the paper reports ~13&ndash;18%) &mdash; often they just knock the source concept out.</p>
       <div id="iv-results" class="iv-results hidden">
         <div class="iv-col"><div class="card-label">default output</div><div id="iv-default" class="iv-text"></div></div>
         <div class="iv-col"><div class="card-label" id="iv-mod-label">with intervention</div><div id="iv-modified" class="iv-text"></div></div>
@@ -168,11 +172,13 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <div class="panel" id="grid-panel">
     <div class="panel-head">
       <h2 id="grid-title">argmax &middot; layer &times; position</h2>
-      <div class="seg small" id="grid-mode" role="tablist" aria-label="Grid content">
-        <button class="seg-btn active" data-grid="argmax" role="tab">argmax token</button>
-        <button class="seg-btn" data-grid="rank" role="tab" disabled title="pin a token first">pin rank heatmap</button>
+      <div class="panel-head-right">
+        <div class="seg small" id="grid-mode" role="tablist" aria-label="Grid content">
+          <button class="seg-btn active" data-grid="argmax" role="tab">argmax token</button>
+          <button class="seg-btn" data-grid="rank" role="tab" disabled title="pin a token first">pin rank heatmap</button>
+        </div>
+        <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-5</p>
       </div>
-      <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-5</p>
     </div>
     <div class="grid-scroll"><table id="grid"></table></div>
   </div>
@@ -211,7 +217,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
       <li>Gurnee et&nbsp;al. (2026). &ldquo;Verbalizable Representations Form a Global Workspace in Language Models.&rdquo; <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Transformer Circuits Thread</a>. The Jacobian lens (J-lens) this site is built around.</li>
       <li>nostalgebraist (2020). &ldquo;interpreting GPT: the logit lens.&rdquo; <a href="https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens" target="_blank" rel="noopener">LessWrong</a>. The baseline the toggle compares against.</li>
       <li>Jacobian-lens weights: <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a> (n&nbsp;=&nbsp;1000, WikiText) on Hugging&nbsp;Face.</li>
-      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a>, Qwen team.</li>
+      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a></li>
       <li>Code for this site and the lens reimplementation: <a href="https://github.com/idhantgulati/j-lens" target="_blank" rel="noopener">github.com/idhantgulati/j-lens</a>.</li>
     </ul>
   </section>
@@ -219,9 +225,9 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <p class="colophon">
     Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant Gulati</a>.
     Compute for this demo is generously provided by <a href="https://modal.com" target="_blank" rel="noopener">Modal</a>,
-    and prompts are logged to keep the lights honest.
+    and prompts are logged to keep tabs on usage.
   </p>
-  <p class="version-line">v0.2.2 &middot; last updated July 7, 2026</p>
+  <p class="version-line">v0.2.3 &middot; last updated July 8, 2026</p>
 </footer>
 
 <script src="config.js"></script>
