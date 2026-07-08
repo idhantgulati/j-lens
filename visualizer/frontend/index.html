@@ -80,12 +80,12 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
 <section class="prompt-row">
   <textarea id="prompt" rows="2" spellcheck="false"
-    placeholder="Type a prompt &mdash; the lens shows what the model is thinking at every layer&hellip;"></textarea>
+    placeholder="Type a prompt&hellip;"></textarea>
   <div class="prompt-controls">
     <button id="analyze-btn" title="Return runs &middot; Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
     <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
       <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
-      <button class="seg-btn" data-mode="logit_lens" role="tab">Logit lens</button>
+      <button class="seg-btn" data-mode="logit_lens" role="tab">logit lens</button>
     </div>
   </div>
 </section>
@@ -202,12 +202,12 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <details>
     <summary>What am I looking at?</summary>
     <div class="about">
-      <p>The <strong>Jacobian lens</strong> (<a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Gurnee et&nbsp;al.&nbsp;2026</a>) reads a hidden activation \(h_\ell\) at layer \(\ell\) by transporting it into the final-layer basis with the corpus-averaged Jacobian \(J_\ell\) and decoding with the model&rsquo;s own unembedding: \(\mathrm{lens}_\ell(h) = \mathrm{unembed}(J_\ell\, h)\). The tokens it surfaces are what the model is <em>verbalizably holding</em> at that depth &mdash; often intermediate concepts that are neither the input nor the next token.</p>
-      <p>The <strong>logit lens</strong> toggle skips the transport (\(\mathrm{unembed}(h)\) directly) &mdash; the classic baseline. Comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
-      <p>Row shading marks the three regions of the network: early <strong>sensory</strong> layers (readouts are noisy and largely uninterpretable &mdash; greyed out), the middle <strong>workspace</strong> band (layers 12&ndash;29 on this model &mdash; where the interpretable action is), and the final <strong>motor</strong> layers, where the readout collapses onto the actual next-token prediction. The top row is the model&rsquo;s real output distribution.</p>
-      <p><strong>Pinning</strong> a token colors every (layer&nbsp;&times;&nbsp;position) cell by that token&rsquo;s rank in the readout (log scale: 1 &middot; 10 &middot; 100 &middot; 1k+), and draws its rank trajectory in the charts &mdash; watch a concept surface in the workspace and dissolve into the motor layers.</p>
-      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with an optional system prompt and assistant prefill. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens &mdash; so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
-      <p><strong>Interventions</strong> (paper &sect;2.5) edit the residual stream through the lens itself. <em>Swap</em> exchanges two tokens&rsquo; lens coordinates across the workspace band (a reflection across their bisector) &mdash; the model&rsquo;s &ldquo;thought&rdquo; is replaced and its output often follows. <em>Steer</em> adds a token&rsquo;s lens direction at every position &mdash; inject a concept and watch the model become preoccupied with it. Both show the default and modified generations side by side. Effects at 4B scale are real but weaker than the paper&rsquo;s frontier-model numbers &mdash; that contrast is itself the finding.</p>
+      <p>The <strong>Jacobian lens</strong> (<a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Gurnee et&nbsp;al.&nbsp;2026</a>) reads a hidden activation \(h_\ell\) at layer \(\ell\) by transporting it into the final-layer basis with the corpus-averaged Jacobian \(J_\ell\) and decoding with the model&rsquo;s own unembedding: \(\mathrm{lens}_\ell(h) = \mathrm{unembed}(J_\ell\, h)\). The tokens it surfaces are what the model is <em>verbalizably holding</em> at that depth, often intermediate concepts that are neither the input nor the next token.</p>
+      <p>The <strong>logit lens</strong> toggle skips the transport and applies \(\mathrm{unembed}(h)\) directly. That is the classic baseline, and comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
+      <p>Row shading marks the three regions of the network. The early <strong>sensory</strong> layers are greyed out; their readouts are noisy and largely uninterpretable. The middle <strong>workspace</strong> band (layers 12&ndash;28 on this model) is where the interpretable action is. In the final <strong>motor</strong> layers the readout collapses onto the actual next-token prediction. The top row is the model&rsquo;s real output distribution.</p>
+      <p><strong>Pinning</strong> a token colors every (layer&nbsp;&times;&nbsp;position) cell by that token&rsquo;s rank in the readout (log scale: 1 &middot; 10 &middot; 100 &middot; 1k+) and draws its rank trajectory in the charts, so you can watch a concept surface in the workspace and dissolve into the motor layers.</p>
+      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with an optional system prompt and assistant prefill. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens, so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
+      <p><strong>Interventions</strong> (paper &sect;2.5) edit the residual stream through the lens itself. <em>Swap</em> exchanges two tokens&rsquo; lens coordinates across the workspace band (a reflection across their bisector); the model&rsquo;s &ldquo;thought&rdquo; is replaced and its output often follows. <em>Steer</em> injects a concept by adding a token&rsquo;s lens direction at every position, and the model becomes preoccupied with it. Both show the default and modified generations side by side. Effects at 4B scale are real but weaker than the paper&rsquo;s frontier-model numbers, and that contrast is itself the finding.</p>
     </div>
   </details>
 
@@ -217,17 +217,16 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
       <li>Gurnee et&nbsp;al. (2026). &ldquo;Verbalizable Representations Form a Global Workspace in Language Models.&rdquo; <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Transformer Circuits Thread</a>. The Jacobian lens (J-lens) this site is built around.</li>
       <li>nostalgebraist (2020). &ldquo;interpreting GPT: the logit lens.&rdquo; <a href="https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens" target="_blank" rel="noopener">LessWrong</a>. The baseline the toggle compares against.</li>
       <li>Jacobian-lens weights: <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a> (n&nbsp;=&nbsp;1000, WikiText) on Hugging&nbsp;Face.</li>
-      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a></li>
+      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a>.</li>
       <li>Code for this site and the lens reimplementation: <a href="https://github.com/idhantgulati/j-lens" target="_blank" rel="noopener">github.com/idhantgulati/j-lens</a>.</li>
     </ul>
   </section>
 
   <p class="colophon">
-    Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant Gulati</a>.
-    Compute for this demo is generously provided by <a href="https://modal.com" target="_blank" rel="noopener">Modal</a>,
-    and prompts are logged to keep tabs on usage.
+    Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant</a> (and Claude Fable).
+    Thanks to <a href="https://modal.com" target="_blank" rel="noopener">Modal</a> for compute.
   </p>
-  <p class="version-line">v0.2.3 &middot; last updated July 8, 2026</p>
+  <p class="version-line">v0.2.5 &middot; last updated July 8, 2026</p>
 </footer>
 
 <script src="config.js"></script>
