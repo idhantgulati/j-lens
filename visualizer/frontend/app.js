@@ -9,7 +9,7 @@ const API = window.JLENS_API;
 // Pin palettes tuned per theme so chips and chart lines stay readable.
 const PIN_PALETTES = {
   light: ["#b3561b", "#2e7d52", "#2d5e9d", "#8c4f96", "#c05746", "#5c6b48"],
-  dark:  ["#eeb060", "#7fb886", "#8ab4dd", "#c79ecf", "#d98079", "#a8b48a"],
+  dark:  ["#d9a441", "#7fb886", "#8ab4dd", "#c79ecf", "#d98079", "#a8b48a"],
 };
 const RANK_CLASSES = [
   [1, "rank-r1"], [10, "rank-r10"], [100, "rank-r100"], [1000, "rank-r1k"], [Infinity, "rank-r10k"],
@@ -68,7 +68,7 @@ function fmtRank(r) {
   return r < 1000 ? String(r) : (r / 1000).toFixed(r < 10000 ? 1 : 0) + "k";
 }
 function fmtProb(p) {
-  return p >= 0.1 ? p.toFixed(2) : p >= 0.001 ? p.toFixed(3) : p.toExponential(0);
+  return p < 0.005 ? "<.01" : p.toFixed(2);
 }
 function rankClass(r) {
   for (const [lim, cls] of RANK_CLASSES) if (r <= lim) return cls;
@@ -317,9 +317,12 @@ function renderJSpace() {
       }
     }
   }
+  // Special/template and pure-punctuation tokens hold real workspace info (turn
+  // structure, formatting state) but drown out content words — shown on demand.
+  const showAll = $("js-show-all").checked;
+  const isContent = (si) => /\p{L}|\p{N}/u.test(r.strings[si]) && !/<.*>/.test(r.strings[si]);
   const rows = [...stats.entries()]
-    // Content words only: needs a letter/digit, no template fragments (<|im_end|>, </think>).
-    .filter(([si]) => /\p{L}|\p{N}/u.test(r.strings[si]) && !/<.*>/.test(r.strings[si]))
+    .filter(([si]) => showAll || isContent(si))
     .sort((a, b) => b[1].total - a[1].total).slice(0, 40);
   const maxCell = Math.max(1, ...rows.map(([, s]) => Math.max(...s.perLayer)));
   $("jspace").innerHTML = rows.map(([si, s]) => {
@@ -663,6 +666,8 @@ $("completion").addEventListener("click", (e) => {
   const t = e.target.closest(".gen-tok");
   if (t) select({ pos: +t.dataset.pos });
 });
+
+$("js-show-all").addEventListener("change", () => { if (S.resp) renderJSpace(); });
 
 document.querySelectorAll("#grid-mode .seg-btn").forEach((b) =>
   b.addEventListener("click", () => { if (!b.disabled) setGridMode(b.dataset.grid); }));

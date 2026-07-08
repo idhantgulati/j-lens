@@ -126,6 +126,9 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <div class="panel" id="jspace-panel">
     <div class="panel-head">
       <h2>J-Space &middot; what the workspace is holding</h2>
+      <label class="cfg-label js-filter" title="Template tokens (&lt;|im_end|&gt;, &lt;/think&gt;) and pure-punctuation tokens also live in the workspace &mdash; often marking turn structure and formatting state">
+        <input type="checkbox" id="js-show-all"> include special &amp; punctuation tokens
+      </label>
       <p class="panel-hint">every token in the top-10 readout of any workspace cell, ranked by how often it appears &middot; click to pin &middot; steer or swap to intervene</p>
     </div>
     <div id="jspace" class="jspace"></div>
@@ -217,7 +220,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     Compute for this demo is generously provided by <a href="https://modal.com" target="_blank" rel="noopener">Modal</a>,
     and prompts are logged to keep the lights honest.
   </p>
-  <p class="version-line">v0.2.0 &middot; last updated July 7, 2026</p>
+  <p class="version-line">v0.2.1 &middot; last updated July 7, 2026</p>
 </footer>
 
 <script src="config.js"></script>

@@ -1,5 +1,5 @@
-/* J-Lens Visualizer — warm daylight light theme + blue night dark theme
-   (palette borrowed from idhant.xyz: day #fffdfa / dusk #db7a2a / night #0a1529 / evening #fccc83).
+/* J-Lens Visualizer — warm daylight light theme (palette borrowed from idhant.xyz:
+   day #fffdfa / dusk #db7a2a) + warm charcoal dark theme.
    One warm accent (the lens light); everything else is ink and grey. */
 
 :root,
@@ -31,29 +31,29 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0a1529;
-  --panel: #0f1b31;
-  --panel-2: #16233c;
-  --line: #243350;
-  --line-soft: #1c2a44;
-  --ink: #e5e7eb;
-  --muted: #a7b1c2;
-  --faint: #64748b;
-  --accent: #eeb060;            /* evening gold on the night sky */
-  --accent-soft: rgba(252, 204, 131, 0.13);
-  --btn-bg: #e5e7eb;
-  --btn-ink: #0f172a;
+  --bg: #181613;
+  --panel: #1f1d19;
+  --panel-2: #282520;
+  --line: #363228;
+  --line-soft: #2c2922;
+  --ink: #e9e4d8;
+  --muted: #a29b8a;
+  --faint: #6f695c;
+  --accent: #d9a441;
+  --accent-soft: rgba(217, 164, 65, 0.14);
+  --btn-bg: #e9e4d8;
+  --btn-ink: #26241f;
   --ok: #7fb886;
   --bad: #d98079;
   --bad-bg: rgba(217, 128, 121, 0.08);
-  --band-workspace: rgba(252, 204, 131, 0.08);
-  --band-motor: rgba(71, 163, 243, 0.09);
-  --motor-ink: #7fb0e0;
-  --r1: rgba(240, 178, 90, 0.92);
-  --r10: rgba(240, 178, 90, 0.50);
-  --r100: rgba(240, 178, 90, 0.28);
-  --r1k: rgba(240, 178, 90, 0.13);
-  --r10k: rgba(140, 150, 170, 0.08);
+  --band-workspace: rgba(217, 164, 65, 0.07);
+  --band-motor: rgba(125, 145, 175, 0.08);
+  --motor-ink: #93a7c4;
+  --r1: rgba(228, 172, 56, 0.92);
+  --r10: rgba(228, 172, 56, 0.50);
+  --r100: rgba(228, 172, 56, 0.28);
+  --r1k: rgba(228, 172, 56, 0.13);
+  --r10k: rgba(160, 150, 130, 0.07);
   --shadow: none;
 }
 
@@ -319,6 +319,8 @@ body.chat-mode .adv-field { opacity: 1; }
 }
 .mini-btn:hover { color: var(--accent); border-color: var(--accent); }
 .js-empty { padding: 10px 15px; }
+.js-filter { font-size: 12px; }
+.js-filter input { accent-color: var(--accent); margin: 0 2px 0 0; vertical-align: -2px; }
 
 /* ---- intervention panel ---- */
 .intervene-body { padding: 12px 15px; }

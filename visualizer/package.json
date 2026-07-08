@@ -1,5 +1,6 @@
 {
   "name": "j-lens-visualizer",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "dev": "serve frontend -l 3000"
