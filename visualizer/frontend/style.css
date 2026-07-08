@@ -168,15 +168,26 @@ h1 { font-family: var(--serif); font-size: 28px; font-weight: 600; letter-spacin
 body:not(.chat-mode) .adv-field { opacity: 0.45; }
 body.chat-mode .adv-field { opacity: 1; }
 
-/* ---- completion (generated output) ---- */
-#completion-card { margin-bottom: 12px; }
-.completion { display: flex; flex-wrap: wrap; gap: 3px; }
-.gen-tok {
-  font-family: var(--mono); font-size: 13.5px; background: var(--band-motor);
-  border: 1px solid transparent; border-radius: 4px; padding: 2px 4px;
-  color: var(--ink); white-space: pre; cursor: pointer;
+/* ---- transcript (chat bubbles, neuronpedia-style) ---- */
+#completion-card { margin-bottom: 12px; background: var(--panel-2); }
+.transcript { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.tr-bubble {
+  max-width: 82%; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px 14px;
+  font-family: var(--serif); font-size: 15px; line-height: 1.75; box-shadow: var(--shadow);
 }
-.gen-tok:hover { border-color: var(--accent); }
+.tr-user { align-self: flex-end; border-bottom-right-radius: 4px; }
+.tr-assistant { align-self: flex-start; border-bottom-left-radius: 4px; }
+.tr-system { align-self: center; max-width: 92%; opacity: 0.85; }
+.tr-tok {
+  background: none; border: none; padding: 0 1px; margin: 0; border-radius: 3px;
+  font: inherit; white-space: pre-wrap; cursor: pointer;
+}
+.tr-tok:hover { background: var(--accent-soft); }
+.tr-tok.tr-special { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.tr-tok.tr-gen { background: var(--band-motor); }
+.tr-tok.tr-gen:hover { background: var(--accent-soft); }
+.tr-tok.tr-sel { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* ---- patience note (cold start) ---- */
 .patience {
@@ -392,7 +403,6 @@ footer summary:hover { color: var(--ink); }
   column-count: 2; column-gap: 56px;
 }
 .references li { margin-bottom: 6px; break-inside: avoid; }
-.references li em { color: var(--ink); font-style: italic; }
 @media (max-width: 900px) { .references ul { column-count: 1; } }
 
 .colophon {

@@ -273,15 +273,46 @@ function isGen(p) {
   return S.resp.gen_start !== undefined && p >= S.resp.gen_start;
 }
 
+// Neuronpedia-style transcript: chat turns as bubbles (user right, assistant
+// left), template tokens in faint mono, ↵ for newlines, every token clickable.
 function renderCompletion() {
   const r = S.resp;
   const card = $("completion-card");
-  if (!r.completion) { card.classList.add("hidden"); return; }
+  const isChat = !!(S.params && S.params.chat);
+  if (!isChat && !r.completion) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
-  const gen = r.prompt_tokens.slice(r.gen_start).map((si, i) =>
-    `<button class="gen-tok" data-pos="${r.gen_start + i}" title="jump to position ${r.gen_start + i}">${esc(showTok(r.strings[si]))}</button>`
-  ).join("");
-  $("completion").innerHTML = gen;
+
+  const isSpecial = (s) => /^<\|[^|]*\|>$/.test(s) || /^<\/?think>$/.test(s.trim());
+  const tokHtml = (p) => {
+    const s = r.strings[r.prompt_tokens[p]];
+    const prev = p > 0 ? r.strings[r.prompt_tokens[p - 1]] : "";
+    const cls = ["tr-tok"];
+    if (isSpecial(s) || prev === "<|im_start|>") cls.push("tr-special"); // roles ride the im_start
+    if (isGen(p)) cls.push("tr-gen");
+    if (p === S.sel.pos) cls.push("tr-sel");
+    const breaks = "<br>".repeat((s.match(/\n/g) || []).length);
+    return `<button class="${cls.join(" ")}" data-pos="${p}" title="position ${p}${isGen(p) ? " (generated)" : ""}">` +
+      `${esc(showTok(s))}</button>${breaks}`;
+  };
+
+  const bubbles = [];
+  let cur = null;
+  const close = () => { if (cur) { bubbles.push(`<div class="tr-bubble tr-${cur.role}">${cur.parts.join("")}</div>`); cur = null; } };
+  for (let p = 0; p < r.prompt_tokens.length; p++) {
+    const s = r.strings[r.prompt_tokens[p]];
+    if (s === "<|im_start|>") {
+      close();
+      const role = (r.strings[r.prompt_tokens[p + 1]] || "").trim();
+      cur = { role: ["user", "assistant", "system"].includes(role) ? role : "assistant", parts: [] };
+    }
+    if (!cur) cur = { role: "assistant", parts: [] }; // raw mode: one left-aligned bubble
+    cur.parts.push(tokHtml(p));
+  }
+  close();
+  $("completion").innerHTML = bubbles.join("");
+  $("completion-label").innerHTML = isChat
+    ? 'transcript <span class="hint">&mdash; the exact token sequence the lens reads; click any token to inspect it below</span>'
+    : 'prompt + model output <span class="hint">&mdash; greedy continuation highlighted; click any token to inspect it below</span>';
 }
 
 function renderPrediction() {
@@ -534,6 +565,7 @@ function renderCharts() {
 function select({ layer = null, pos = null }) {
   if (layer !== null) S.sel.layer = layer;
   if (pos !== null) S.sel.pos = pos;
+  renderCompletion(); // keep the transcript's selected-token highlight in sync
   renderGrid();
   renderByLayer();
   renderByPos();
@@ -663,7 +695,7 @@ $("jspace").addEventListener("click", (e) => {
 });
 
 $("completion").addEventListener("click", (e) => {
-  const t = e.target.closest(".gen-tok");
+  const t = e.target.closest(".tr-tok");
   if (t) select({ pos: +t.dataset.pos });
 });
 

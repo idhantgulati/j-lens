@@ -102,8 +102,8 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 <section id="results" class="hidden">
 
   <div class="card hidden" id="completion-card">
-    <div class="card-label">model output <span class="hint">&mdash; greedy continuation; the lens grid below covers these tokens too</span></div>
-    <div id="completion" class="completion"></div>
+    <div class="card-label" id="completion-label">transcript <span class="hint">&mdash; the exact token sequence the lens reads; click any token to inspect it below</span></div>
+    <div id="completion" class="transcript"></div>
   </div>
 
   <div class="summary-row">
@@ -208,10 +208,11 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <section class="references">
     <h3>References</h3>
     <ul>
-      <li><em>The idea.</em> Everything here is built around the Jacobian lens from Gurnee et&nbsp;al. (2026), &ldquo;<a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Verbalizable Representations Form a Global Workspace in Language Models</a>,&rdquo; published in the Transformer Circuits Thread.</li>
-      <li><em>The baseline.</em> The logit-lens toggle compares against nostalgebraist&rsquo;s 2020 classic, &ldquo;<a href="https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens" target="_blank" rel="noopener">interpreting GPT: the logit lens</a>.&rdquo;</li>
-      <li><em>The weights.</em> The lens is the pre-fitted n&nbsp;=&nbsp;1000 WikiText release from <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a>, applied to <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a>.</li>
-      <li><em>The code.</em> This site and the lens reimplementation behind it live at <a href="https://github.com/idhantgulati/j-lens" target="_blank" rel="noopener">github.com/idhantgulati/j-lens</a>.</li>
+      <li>Gurnee et&nbsp;al. (2026). &ldquo;Verbalizable Representations Form a Global Workspace in Language Models.&rdquo; <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Transformer Circuits Thread</a>. The Jacobian lens (J-lens) this site is built around.</li>
+      <li>nostalgebraist (2020). &ldquo;interpreting GPT: the logit lens.&rdquo; <a href="https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens" target="_blank" rel="noopener">LessWrong</a>. The baseline the toggle compares against.</li>
+      <li>Jacobian-lens weights: <a href="https://huggingface.co/neuronpedia/jacobian-lens" target="_blank" rel="noopener">neuronpedia/jacobian-lens</a> (n&nbsp;=&nbsp;1000, WikiText) on Hugging&nbsp;Face.</li>
+      <li>Model: <a href="https://huggingface.co/Qwen/Qwen3.5-4B" target="_blank" rel="noopener">Qwen3.5-4B</a>, Qwen team.</li>
+      <li>Code for this site and the lens reimplementation: <a href="https://github.com/idhantgulati/j-lens" target="_blank" rel="noopener">github.com/idhantgulati/j-lens</a>.</li>
     </ul>
   </section>
 
@@ -220,7 +221,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     Compute for this demo is generously provided by <a href="https://modal.com" target="_blank" rel="noopener">Modal</a>,
     and prompts are logged to keep the lights honest.
   </p>
-  <p class="version-line">v0.2.1 &middot; last updated July 7, 2026</p>
+  <p class="version-line">v0.2.2 &middot; last updated July 7, 2026</p>
 </footer>
 
 <script src="config.js"></script>
