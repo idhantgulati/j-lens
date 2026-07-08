@@ -1,4 +1,8 @@
-/* J-Lens Visualizer — all state, rendering, and API calls. Zero dependencies. */
+/* J-Lens Visualizer — all state, rendering, and API calls. */
+
+import { inject } from "@vercel/analytics";
+
+inject();
 
 const API = window.JLENS_API;
 

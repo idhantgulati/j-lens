@@ -48,11 +48,11 @@ on cache miss it re-runs the forward from the prompt (`"recomputed": true`).
 
 ```bash
 # backend (from the repo root; ships ../jlens.py into the image)
-modal deploy Visualizer/backend/app.py
+modal deploy visualizer/backend/app.py
 modal app logs j-lens-visualizer          # inspect requests/timings
 
 # frontend (config.js holds the API URL)
-cd Visualizer/frontend && vercel deploy --prod --yes
+cd visualizer/frontend && vercel deploy --prod --yes
 ```
 
 Smoke tests:
@@ -69,10 +69,10 @@ curl -X POST $API/api/analyze -H 'content-type: application/json' \
 Both halves deploy automatically on `git push` to `main`:
 
 - **Frontend** — the Vercel project is git-connected to `idhantgulati/j-lens` with
-  root directory `Visualizer/frontend`; pushes to `main` go to production, other
+  root directory `visualizer/frontend`; pushes to `main` go to production, other
   branches get preview URLs.
 - **Backend** — `.github/workflows/deploy-backend.yml` runs
-  `modal deploy Visualizer/backend/app.py` when `Visualizer/backend/**` or `jlens.py`
+  `modal deploy visualizer/backend/app.py` when `visualizer/backend/**` or `jlens.py`
   change (GitHub secrets `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`).
 
 ## Supabase logging (optional)
@@ -100,7 +100,7 @@ alter table jlens_requests enable row level security;  -- service key bypasses R
 2. Copy `.env.example` to `.env`, fill `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`, then:
 
 ```bash
-cd Visualizer && set -a && source .env && set +a
+cd visualizer && set -a && source .env && set +a
 modal secret create supabase-jlens SUPABASE_URL="$SUPABASE_URL" \
   SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" --force
 modal deploy backend/app.py   # restart containers so they pick up the secret

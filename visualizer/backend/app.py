@@ -10,7 +10,7 @@ container and serves a FastAPI app. Endpoints:
     POST /api/rank      {request_id, prompt, token_id|token_str} -> the token's rank
                         at every (layer, position), for pin heatmaps
 
-Deploy from the repo root:  modal deploy Visualizer/backend/app.py
+Deploy from the repo root:  modal deploy visualizer/backend/app.py
 """
 
 import os

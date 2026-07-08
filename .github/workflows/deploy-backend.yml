@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "Visualizer/backend/**"
+      - "visualizer/backend/**"
       - "jlens.py"
 
 jobs:
@@ -19,4 +19,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install modal
-      - run: modal deploy Visualizer/backend/app.py
+      - run: modal deploy visualizer/backend/app.py
