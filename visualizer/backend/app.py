@@ -5,7 +5,7 @@ container and serves a FastAPI app. Endpoints:
 
     GET  /healthz       liveness, no GPU work
     GET  /warmup        touches the GPU container so page load hides the cold start
-    POST /api/analyze   {prompt, top_k, chat?, system_prompt?, prefill?,
+    POST /api/analyze   {prompt, top_k, chat?, messages?, system_prompt?, prefill?,
                         max_new_tokens?} -> greedy completion + per-(layer,
                         position) top-k over prompt AND generated tokens, for
                         J-lens, logit-lens, and the model's own output
@@ -15,8 +15,10 @@ container and serves a FastAPI app. Endpoints:
                         strength?, layer_lo?, layer_hi?} -> default vs modified
                         greedy generations (paper §2.5 workspace interventions)
 
-Chat mode wraps the prompt in Qwen's chat template with enable_thinking=False
+Chat mode wraps messages in Qwen's chat template with enable_thinking=False
 (main.ipynb verbal-report protocol); prefill text is appended to the template.
+`messages` carries prior user/assistant turns; `prompt` is always the latest user
+message. Prompt + generation share a single MAX_SEQUENCE token budget.
 Swap follows the notebook exactly: single-token surface-form pairs (leading
 space + case variants), bisector reflection at alpha=1 over the workspace band
 (layers 12-28). Steer adds strength * mean_residual_norm * unit lens vector.
@@ -39,9 +41,9 @@ LENS_FILE = "qwen3.5-4b/jlens/Salesforce-wikitext/Qwen3.5-4B_jacobian_lens_n1000
 LENS_REVISION = "qwen-n1000"
 
 MAX_CHARS = 4000
-MAX_TOKENS = 200
+MAX_SEQUENCE = 320   # total tokens analyzed (prompt + greedy generation)
+MAX_NEW = 128        # max generation tokens per request (clamped to remaining budget)
 MAX_K = 10
-MAX_NEW = 48
 CACHE_SIZE = 8  # cached activations, ~40 MB each
 WORKSPACE_BAND = [12, 28]  # main.ipynb: WORKSPACE = range(round(0.38*n), round(0.92*n))
 NORM_PROMPTS = [  # generic contexts for mean_residual_norms (each > 17 tokens)
@@ -137,15 +139,28 @@ class Server:
 
     # ---- prompt rendering --------------------------------------------------
 
+    def _chat_messages(self, req):
+        """Build chat-template message list: optional system, prior turns, latest user."""
+        msgs = []
+        if getattr(req, "system_prompt", None) and req.system_prompt.strip():
+            msgs.append({"role": "system", "content": req.system_prompt.strip()})
+        for m in getattr(req, "messages", None) or []:
+            role = m.role if hasattr(m, "role") else m.get("role")
+            content = (m.content if hasattr(m, "content") else m.get("content") or "").strip()
+            if not content:
+                continue
+            if role not in ("user", "assistant"):
+                raise ValueError(f"invalid message role: {role}")
+            msgs.append({"role": role, "content": content})
+        msgs.append({"role": "user", "content": req.prompt.strip()})
+        return msgs
+
     def _render_text(self, req):
         """Final string fed to the model. Raw mode rstrips (a trailing space becomes
         the readout token and wrecks baselines); the chat template is used verbatim."""
         if not getattr(req, "chat", False):
             return req.prompt.rstrip()
-        msgs = []
-        if getattr(req, "system_prompt", None) and req.system_prompt.strip():
-            msgs.append({"role": "system", "content": req.system_prompt.strip()})
-        msgs.append({"role": "user", "content": req.prompt})
+        msgs = self._chat_messages(req)
         text = self.tok.apply_chat_template(
             msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False
         )
@@ -153,15 +168,26 @@ class Server:
             text += req.prefill
         return text
 
+    def _prompt_token_count(self, req):
+        return len(self.tok(self._render_text(req)).input_ids)
+
+    def _gen_budget(self, req, prompt_len):
+        """How many new tokens we can generate within MAX_SEQUENCE."""
+        room = max(0, MAX_SEQUENCE - prompt_len)
+        requested = max(0, getattr(req, "max_new_tokens", 0) or 0)
+        return min(requested, MAX_NEW, room)
+
     # ---- compute -----------------------------------------------------------
 
     def _forward_full(self, req):
         """Render, optionally generate greedily, then one recorded forward over the
         full sequence. Returns (ids [1,T+G], acts fp16 cpu, gen_start)."""
         text = self._render_text(req)
-        ids = self.jlens.encode(self.model, self.tok, text, max_len=MAX_TOKENS)
+        full_len = self._prompt_token_count(req)
+        truncated = full_len > MAX_SEQUENCE
+        ids = self.jlens.encode(self.model, self.tok, text, max_len=MAX_SEQUENCE)
         gen_start = ids.shape[1]
-        n_new = max(0, min(getattr(req, "max_new_tokens", 0) or 0, MAX_NEW))
+        n_new = self._gen_budget(req, gen_start)
         with self.torch.no_grad():
             if n_new > 0:
                 ids = self.model.generate(
@@ -229,9 +255,14 @@ class Server:
         api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
         api.add_middleware(GZipMiddleware, minimum_size=1000)
 
+        class ChatMessage(BaseModel):
+            role: str
+            content: str
+
         class PromptParams(BaseModel):
             prompt: str
             chat: bool = False
+            messages: list[ChatMessage] | None = None
             system_prompt: str | None = None
             prefill: str | None = None
             max_new_tokens: int = 0
@@ -255,7 +286,14 @@ class Server:
         def check_prompt(req):
             if not req.prompt.strip():
                 raise HTTPException(400, "empty prompt")
-            if len(req.prompt) > MAX_CHARS:
+            total = len(req.prompt)
+            for m in req.messages or []:
+                if m.role not in ("user", "assistant"):
+                    raise HTTPException(400, f"invalid message role: {m.role}")
+                total += len(m.content)
+            if len(req.messages or []) > 24:
+                raise HTTPException(400, "too many prior turns (max 24)")
+            if total > MAX_CHARS:
                 raise HTTPException(413, f"prompt too long (max {MAX_CHARS} chars)")
 
         @api.get("/healthz")
@@ -271,6 +309,7 @@ class Server:
                 "lens_layers": [self.lens.layers[0], self.lens.layers[-1]],
                 "n_layers": self.final + 1,
                 "version": 3,
+                "limits": {"max_sequence": MAX_SEQUENCE, "max_new": MAX_NEW, "max_chars": MAX_CHARS},
             }
 
         @api.post("/api/analyze")
@@ -279,7 +318,7 @@ class Server:
             k = max(1, min(req.top_k, MAX_K))
             t0 = time.time()
             try:
-                truncated = len(self.tok(self._render_text(req)).input_ids) > MAX_TOKENS
+                truncated = self._prompt_token_count(req) > MAX_SEQUENCE
                 with self.gpu_lock:
                     ids, acts, gen_start = self._forward_full(req)
                     t_fwd = time.time()
@@ -299,6 +338,11 @@ class Server:
                 self._cache_put(rid, ids, acts, gen_start)
                 resp = self._build_response(rid, ids, topks, model_top, truncated)
                 resp["gen_start"] = gen_start
+                resp["token_budget"] = {
+                    "max": MAX_SEQUENCE,
+                    "prompt": gen_start,
+                    "generated": ids.shape[1] - gen_start,
+                }
                 resp["completion"] = (
                     self.tok.decode(ids[0, gen_start:], skip_special_tokens=True)
                     if ids.shape[1] > gen_start else ""
@@ -371,7 +415,9 @@ class Server:
             lo = max(self.lens.layers[0], min(req.layer_lo, self.lens.layers[-1]))
             hi = max(lo, min(req.layer_hi, self.lens.layers[-1]))
             layers = [l for l in self.lens.layers if lo <= l <= hi]
-            n_new = max(1, min(req.max_new_tokens or 16, MAX_NEW))
+            n_new = max(1, self._gen_budget(req, self.jlens.encode(
+                self.model, self.tok, self._render_text(req), max_len=MAX_SEQUENCE
+            ).shape[1]))
             t0 = time.time()
             try:
                 if req.kind == "swap":
@@ -403,7 +449,7 @@ class Server:
 
                 text = self._render_text(req)
                 with self.gpu_lock:
-                    ids = self.jlens.encode(self.model, self.tok, text, max_len=MAX_TOKENS)
+                    ids = self.jlens.encode(self.model, self.tok, text, max_len=MAX_SEQUENCE)
                     default_text = self._generate(ids, n_new)
                     default_top = self._next_top5(ids)
                     modified_text = self._generate(ids, n_new, edits)

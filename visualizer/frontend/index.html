@@ -53,41 +53,61 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 </header>
 
 <section class="run-config">
-  <div class="seg small" id="chat-toggle" role="tablist" aria-label="Prompt format">
-    <button class="seg-btn active" data-chat="raw" role="tab" title="The text is fed to the model verbatim">raw text</button>
-    <button class="seg-btn" data-chat="chat" role="tab" title="The text is wrapped in Qwen's chat template as a user message (thinking disabled)">chat</button>
+  <div class="run-config-group">
+    <div class="seg small" id="chat-toggle" role="tablist" aria-label="Prompt format">
+      <button class="seg-btn active" data-chat="raw" role="tab" title="The text is fed to the model verbatim">raw text</button>
+      <button class="seg-btn" data-chat="chat" role="tab" title="Qwen chat template with optional multi-turn history (thinking disabled)">chat</button>
+    </div>
+    <label class="cfg-label cfg-gen" for="gen-len" title="Maximum new tokens the model may write (greedy). Prompt + generation share a 320-token sequence limit.">
+      <span class="cfg-label-text">max gen tokens</span>
+      <select id="gen-len">
+        <option value="0">0</option>
+        <option value="16" selected>16</option>
+        <option value="32">32</option>
+        <option value="64">64</option>
+        <option value="128">128</option>
+      </select>
+    </label>
+    <span id="budget-hint" class="budget-hint" aria-live="polite"></span>
   </div>
-  <label class="cfg-label" for="gen-len">generate
-    <select id="gen-len">
-      <option value="0">0 tokens (prompt only)</option>
-      <option value="8">8 tokens</option>
-      <option value="16" selected>16 tokens</option>
-      <option value="32">32 tokens</option>
-      <option value="48">48 tokens</option>
-    </select>
-  </label>
   <button id="advanced-toggle" class="ghost-btn" aria-expanded="false">more options</button>
 </section>
 
-<section id="advanced" class="advanced hidden">
-  <label class="adv-field">system prompt <span class="adv-hint">chat mode only</span>
-    <input id="system-prompt" placeholder="e.g. Answer in one word." autocomplete="off">
-  </label>
-  <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only &mdash; the model&rsquo;s reply starts with this</span>
-    <input id="prefill" placeholder='e.g. "The answer is' autocomplete="off">
-  </label>
-</section>
+<section class="input-stack">
+  <section id="advanced" class="advanced hidden">
+    <label class="adv-field">system prompt <span class="adv-hint">chat mode only</span>
+      <input id="system-prompt" placeholder="e.g. Answer in one word." autocomplete="off">
+    </label>
+    <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only &mdash; the model&rsquo;s reply starts with this</span>
+      <input id="prefill" placeholder='e.g. "The answer is' autocomplete="off">
+    </label>
+  </section>
 
-<section class="prompt-row">
-  <textarea id="prompt" rows="2" spellcheck="false"
-    placeholder="Type a prompt&hellip;"></textarea>
-  <div class="prompt-controls">
-    <button id="analyze-btn" title="Return runs &middot; Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
-    <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
-      <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
-      <button class="seg-btn" data-mode="logit_lens" role="tab">logit lens</button>
+  <section id="chat-history-panel" class="chat-history-panel hidden">
+    <div class="chat-history-head">
+      <span class="chat-history-label">conversation</span>
+      <span id="chat-turn-count" class="chat-turn-count hidden"></span>
     </div>
-  </div>
+    <div id="chat-history" class="chat-history"></div>
+  </section>
+
+  <section class="prompt-row">
+    <textarea id="prompt" rows="2" spellcheck="false"
+      placeholder="Type a prompt&hellip;"></textarea>
+    <div class="prompt-controls">
+      <button id="analyze-btn" title="Return runs &middot; Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
+      <div id="prompt-chat-actions" class="prompt-chat-actions hidden">
+        <button id="chat-clear" type="button" class="ghost-btn chat-clear-btn" disabled title="Remove all prior turns from this conversation">Clear conversation</button>
+        <label class="cfg-label chat-keep" title="After analyze, append your message and the model reply to the history above">
+          <input type="checkbox" id="chat-keep" checked> keep turns
+        </label>
+      </div>
+      <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
+        <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
+        <button class="seg-btn" data-mode="logit_lens" role="tab">logit lens</button>
+      </div>
+    </div>
+  </section>
 </section>
 
 <p id="patience-note" class="patience hidden"></p>
@@ -99,6 +119,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   <button class="example">The capital of the state containing Dallas is</button>
   <button class="example">El opuesto de "grande" es "</button>
   <button class="example" data-chat="chat">Think of a sport. Answer in one word.</button>
+  <button class="example" data-chat="chat" data-multiturn='[{"role":"user","content":"Think of a sport."},{"role":"assistant","content":"Tennis"}]'>multi-turn: name another sport</button>
 </section>
 
 <div id="error-banner" class="error hidden"></div>
@@ -177,7 +198,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
           <button class="seg-btn active" data-grid="argmax" role="tab">argmax token</button>
           <button class="seg-btn" data-grid="rank" role="tab" disabled title="pin a token first">pin rank heatmap</button>
         </div>
-        <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-5</p>
+        <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-10</p>
       </div>
     </div>
     <div class="grid-scroll"><table id="grid"></table></div>
@@ -185,12 +206,12 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
   <div class="detail-row">
     <div class="panel" id="by-layer-panel">
-      <div class="panel-head"><h2 id="by-layer-title">by layer</h2><p class="panel-hint">top-k at the selected position, every layer</p></div>
+      <div class="panel-head"><h2 id="by-layer-title">by layer</h2><p class="panel-hint">top-k at the selected position, every layer · hover for details</p></div>
       <div id="by-layer" class="stack"></div>
       <svg id="chart-layer" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs layer"></svg>
     </div>
     <div class="panel" id="by-pos-panel">
-      <div class="panel-head"><h2 id="by-pos-title">by position</h2><p class="panel-hint">top-k at the selected layer, every position</p></div>
+      <div class="panel-head"><h2 id="by-pos-title">by position</h2><p class="panel-hint">top-k at the selected layer, every position · hover for details</p></div>
       <div id="by-pos" class="stack"></div>
       <svg id="chart-pos" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs position"></svg>
     </div>
@@ -206,7 +227,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
       <p>The <strong>logit lens</strong> toggle skips the transport and applies \(\mathrm{unembed}(h)\) directly. That is the classic baseline, and comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
       <p>Row shading marks the three regions of the network. The early <strong>sensory</strong> layers are greyed out; their readouts are noisy and largely uninterpretable. The middle <strong>workspace</strong> band (layers 12&ndash;28 on this model) is where the interpretable action is. In the final <strong>motor</strong> layers the readout collapses onto the actual next-token prediction. The top row is the model&rsquo;s real output distribution.</p>
       <p><strong>Pinning</strong> a token colors every (layer&nbsp;&times;&nbsp;position) cell by that token&rsquo;s rank in the readout (log scale: 1 &middot; 10 &middot; 100 &middot; 1k+) and draws its rank trajectory in the charts, so you can watch a concept surface in the workspace and dissolve into the motor layers.</p>
-      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with an optional system prompt and assistant prefill. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens, so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
+      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with optional system prompt, assistant prefill, and <strong>multi-turn history</strong> (prior user/assistant turns are sent before your latest message). Prompt and generation share a <strong>320-token</strong> budget &mdash; long histories leave less room for generation. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens, so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
       <p><strong>Interventions</strong> (paper &sect;2.5) edit the residual stream through the lens itself. <em>Swap</em> exchanges two tokens&rsquo; lens coordinates across the workspace band (a reflection across their bisector); the model&rsquo;s &ldquo;thought&rdquo; is replaced and its output often follows. <em>Steer</em> injects a concept by adding a token&rsquo;s lens direction at every position, and the model becomes preoccupied with it. Both show the default and modified generations side by side. Effects at 4B scale are real but weaker than the paper&rsquo;s frontier-model numbers, and that contrast is itself the finding.</p>
     </div>
   </details>
@@ -226,7 +247,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant</a> (and Claude Fable).
     Thanks to <a href="https://modal.com" target="_blank" rel="noopener">Modal</a> for compute.
   </p>
-  <p class="version-line">v0.2.5 &middot; last updated July 8, 2026</p>
+  <p class="version-line">v0.2.12 &middot; last updated July 8, 2026</p>
 </footer>
 
 <script src="config.js"></script>

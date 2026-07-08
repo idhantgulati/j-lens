@@ -14,6 +14,7 @@ const PIN_PALETTES = {
 const RANK_CLASSES = [
   [1, "rank-r1"], [10, "rank-r10"], [100, "rank-r100"], [1000, "rank-r1k"], [Infinity, "rank-r10k"],
 ];
+const LIMITS = { max_sequence: 320, max_new: 128, max_chars: 4000 };
 
 const S = {
   resp: null,
@@ -21,6 +22,7 @@ const S = {
   mode: "jlens",       // "jlens" | "logit_lens"
   gridMode: "argmax",  // "argmax" | "rank"
   chat: "raw",         // "raw" | "chat"
+  chatTurns: [],       // prior {role, content} turns in chat mode
   sel: { layer: 24, pos: 0 },
   pins: [],            // {tokenId, text, colorIdx, ranks, loading}
   activePin: -1,
@@ -30,13 +32,17 @@ const S = {
 
 // Prompt parameters as currently configured in the controls.
 function promptParams() {
-  return {
+  const p = {
     prompt: $("prompt").value,
     chat: S.chat === "chat",
     system_prompt: $("system-prompt").value || null,
     prefill: $("prefill").value || null,
     max_new_tokens: +$("gen-len").value,
   };
+  if (S.chat === "chat" && S.chatTurns.length) {
+    p.messages = S.chatTurns.map((t) => ({ role: t.role, content: t.content }));
+  }
+  return p;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -95,6 +101,269 @@ function scrollStackToRow(stackEl, rowEl) {
   else if (rowBottom > viewBottom) stackEl.scrollTop = rowBottom - stackEl.clientHeight;
 }
 
+// ---------- rich hover tooltips ----------
+
+const tipEl = (() => {
+  const el = document.createElement("div");
+  el.id = "jlens-tip";
+  el.className = "jlens-tip hidden";
+  el.setAttribute("role", "tooltip");
+  document.body.appendChild(el);
+  return el;
+})();
+let tipHideTimer = null;
+let tipTarget = null;
+
+function bandName(layer) {
+  const [w0, w1] = S.resp.workspace_band;
+  if (layer > w1) return "motor";
+  if (layer >= w0) return "workspace";
+  return "sensory";
+}
+function bandBadge(layer) {
+  const b = bandName(layer);
+  return `<span class="tip-badge is-${b}">${b}</span>`;
+}
+function modeLabel() {
+  return S.mode === "jlens" ? "J-lens" : "logit lens";
+}
+function tipTopkList(tk, pr, { limit = 10, highlightSi = null } = {}) {
+  const r = S.resp;
+  const rows = tk.slice(0, limit).map((si, i) => {
+    const top = i === 0 ? " is-top" : "";
+    const hi = highlightSi === si ? " is-top" : "";
+    return `<li class="${top || hi}">` +
+      `<span class="tip-rank">${i + 1}</span>` +
+      `<span class="tip-tok">${esc(showTok(r.strings[si]))}</span>` +
+      `<span class="tip-prob">${fmtProb(pr[i])}</span></li>`;
+  }).join("");
+  return `<ol class="tip-list">${rows}</ol>`;
+}
+function tipHead(text) { return `<p class="tip-head">${text}</p>`; }
+function tipMeta(...parts) { return `<p class="tip-meta">${parts.join(" ")}</p>`; }
+function tipFoot(text) { return `<p class="tip-foot">${text}</p>`; }
+
+function positionTip(x, y) {
+  tipEl.classList.remove("hidden");
+  const pad = 14;
+  const rect = tipEl.getBoundingClientRect();
+  let left = x + pad;
+  let top = y + pad;
+  if (left + rect.width > window.innerWidth - 10) left = Math.max(10, x - rect.width - pad);
+  if (top + rect.height > window.innerHeight - 10) top = Math.max(10, y - rect.height - pad);
+  tipEl.style.left = `${left}px`;
+  tipEl.style.top = `${top}px`;
+}
+function showTip(html, x, y, scrollable = false) {
+  clearTimeout(tipHideTimer);
+  tipEl.innerHTML = html;
+  tipEl.classList.toggle("is-scrollable", scrollable);
+  requestAnimationFrame(() => positionTip(x, y));
+}
+function hideTip() {
+  tipHideTimer = setTimeout(() => {
+    tipEl.classList.add("hidden");
+    tipTarget = null;
+  }, 60);
+}
+
+function tipGridCell(L, p) {
+  const r = S.resp;
+  const [tk, pr] = topkAt(L, p);
+  const ctx = esc(JSON.stringify(r.strings[r.prompt_tokens[p]]));
+  const pin = S.gridMode === "rank" ? S.pins[S.activePin] : null;
+  let meta = `${bandBadge(L)}${modeLabel()}`;
+  let foot = "click to inspect this layer × position";
+  if (pin?.ranks) {
+    const rank = rankAt(pin, L, p);
+    meta += `<span class="tip-badge is-rank">rank ${fmtRank(rank)}</span> for ${esc(JSON.stringify(pin.text))}`;
+    foot = `pinned rank · ${foot}`;
+  }
+  return tipHead(`${layerLabel(L)} @ pos ${p}`) +
+    tipMeta(`context token ${ctx}`, meta) +
+    tipTopkList(tk, pr) +
+    tipFoot(foot);
+}
+function tipTokCell(si, rank, prob, layer, pos) {
+  const r = S.resp;
+  const tok = esc(JSON.stringify(r.strings[si]));
+  const where = layer !== undefined
+    ? `${layerLabel(layer)} @ pos ${pos}`
+  : pos !== undefined
+    ? `pos ${pos} · ${layerLabel(S.sel.layer)}`
+    : `pos ${S.sel.pos}`;
+  return tipHead(tok) +
+    tipMeta(`${bandBadge(layer ?? S.sel.layer)}${where} · ${modeLabel()}`) +
+    `<dl class="tip-kv">` +
+    `<dt>rank</dt><dd>#${rank}</dd>` +
+    `<dt>prob</dt><dd>${fmtProb(prob)}</dd>` +
+    `</dl>` +
+    tipFoot("click to pin this token");
+}
+function tipAxisPos(p) {
+  const r = S.resp;
+  const tok = esc(JSON.stringify(r.strings[r.prompt_tokens[p]]));
+  const gen = isGen(p) ? " · generated token" : "";
+  const [tk, pr] = topkAt(S.sel.layer, p);
+  return tipHead(`position ${p}`) +
+    tipMeta(`token ${tok}${gen}`, `${bandBadge(S.sel.layer)}${layerLabel(S.sel.layer)} readout`) +
+    tipTopkList(tk, pr, { limit: 5 }) +
+    tipFoot("click to select this position");
+}
+function tipLayerLabel(L) {
+  const r = S.resp;
+  const [w0, w1] = r.workspace_band;
+  const band = bandName(L);
+  let region = band === "workspace" ? `workspace band (L${w0}–L${w1})` :
+    band === "motor" ? "motor layers (next-token prediction)" : "sensory layers (noisy readouts)";
+  const [tk, pr] = topkAt(L, S.sel.pos);
+  const ctx = esc(JSON.stringify(r.strings[r.prompt_tokens[S.sel.pos]]));
+  return tipHead(layerLabel(L)) +
+    tipMeta(`${bandBadge(L)}${region}`, `top readout at pos ${S.sel.pos} (${ctx}) · ${modeLabel()}`) +
+    tipTopkList(tk, pr, { limit: 5 }) +
+    tipFoot("click to select this layer");
+}
+function tipTranscriptPos(p) {
+  const r = S.resp;
+  const tok = esc(JSON.stringify(r.strings[r.prompt_tokens[p]]));
+  const gen = isGen(p) ? `<span class="tip-badge is-motor">generated</span>` : "";
+  const [tk, pr] = topkAt(r.n_layers - 1, p);
+  return tipHead(`position ${p}`) +
+    tipMeta(`token ${tok}`, gen) +
+    tipMeta(`model next-token prediction from here`) +
+    tipTopkList(tk, pr, { limit: 5 }) +
+    tipFoot("click to inspect readouts at this position");
+}
+function tipPred(si, prob, rank) {
+  const r = S.resp;
+  return tipHead(esc(JSON.stringify(r.strings[si]))) +
+    tipMeta(`model output · pos ${S.sel.pos}`, `#${rank} · prob ${fmtProb(prob)}`) +
+    tipFoot("click to pin and trace across layers");
+}
+function tipJRow(row) {
+  const r = S.resp;
+  const si = +row.dataset.si;
+  const total = +row.dataset.total;
+  const tok = esc(JSON.stringify(r.strings[si]));
+  const [w0, w1] = r.workspace_band;
+  const layers = row.dataset.layers.split(",").map((x) => +x);
+  const counts = row.dataset.counts.split(",").map((x) => +x);
+  const strip = layers.map((L, i) => {
+    const c = counts[i];
+    const cls = c ? "has-count" : "";
+    return `<span class="${cls}">L${L}${c ? ` · ${c}×` : ""}</span>`;
+  }).join("");
+  return tipHead(tok) +
+    tipMeta(`appears in <strong>${total}</strong> workspace top-10 cells`, `L${w0}–L${w1} · ${modeLabel()}`) +
+    `<div class="tip-strip">${strip}</div>` +
+    tipFoot("click token to pin · steer/swap on hover row actions");
+}
+function tipJCell(layer, count, si) {
+  const r = S.resp;
+  const tok = esc(JSON.stringify(r.strings[si]));
+  if (!count) {
+    return tipHead(`L${layer}`) +
+      tipMeta(`token ${tok} not in top-10 at any workspace position on this layer`) +
+      tipFoot("darker cells = more frequent across positions");
+  }
+  return tipHead(`L${layer} · ${count}×`) +
+    tipMeta(`token ${tok} in top-10 at ${count} position${count === 1 ? "" : "s"} on this layer`) +
+    tipFoot("part of the workspace aggregate strip");
+}
+function tipPinChip(pin, i) {
+  const color = pinColor(pin);
+  const state = pin.loading ? "loading ranks…" :
+    pin.ranks ? `traced across ${S.resp.n_layers} layers` : "no rank data";
+  return tipHead(esc(JSON.stringify(pin.text))) +
+    tipMeta(`pin #${i + 1}`, `<span style="color:${color}">●</span> ${state}`) +
+    tipFoot(i === S.activePin ? "active pin for rank heatmap · click chip to activate" : "click chip to use for rank heatmap");
+}
+
+function findTipTarget(el) {
+  if (!el?.closest) return null;
+  return el.closest(
+    "#grid td.cell, #grid td.axis-tok, #grid th.layer-label, " +
+    ".stack-table td.tok-cell, .stack-table th.layer-label, " +
+    ".by-pos-table th.pos-label, .by-pos-table th.tok-label, " +
+    ".tr-tok, .pred, .js-row, .js-cell, .pin-chip, #prediction-list .pred"
+  );
+}
+
+function buildTip(el) {
+  if (!S.resp) return null;
+  if (el.matches("#grid td.cell")) {
+    return tipGridCell(+el.dataset.l, +el.dataset.p);
+  }
+  if (el.matches("#grid td.axis-tok")) {
+    return tipAxisPos(+el.dataset.axis);
+  }
+  if (el.matches("#grid th.layer-label, .stack-table th.layer-label")) {
+    const L = el.dataset.layer !== undefined ? +el.dataset.layer :
+      (el.textContent.match(/L(\d+)/) || [])[1];
+    if (L !== undefined && !Number.isNaN(+L)) return tipLayerLabel(+L);
+    return null;
+  }
+  if (el.matches(".stack-table td.tok-cell")) {
+    const si = +el.dataset.si;
+    const rank = +el.dataset.rank;
+    const prob = +el.dataset.prob;
+    const layer = el.dataset.layer !== undefined ? +el.dataset.layer : undefined;
+    const pos = el.dataset.pos !== undefined ? +el.dataset.pos : undefined;
+    return tipTokCell(si, rank, prob, layer, pos);
+  }
+  if (el.matches(".by-pos-table th.pos-label, .by-pos-table th.tok-label")) {
+    return tipAxisPos(+el.dataset.pos);
+  }
+  if (el.matches(".tr-tok")) {
+    return tipTranscriptPos(+el.dataset.pos);
+  }
+  if (el.matches(".pred")) {
+    const si = +el.dataset.si;
+    const rank = +el.dataset.rank;
+    const prob = +el.dataset.prob;
+    return tipPred(si, prob, rank);
+  }
+  if (el.matches(".js-row")) {
+    return tipJRow(el);
+  }
+  if (el.matches(".js-cell")) {
+    const si = +el.dataset.si;
+    if (si < 0) {
+      return tipHead(`L${el.dataset.layer}`) + tipMeta("layer axis on the workspace strip");
+    }
+    return tipJCell(+el.dataset.layer, +el.dataset.count, si);
+  }
+  if (el.matches(".pin-chip")) {
+    const pin = S.pins[+el.dataset.pin];
+    if (pin) return tipPinChip(pin, +el.dataset.pin);
+  }
+  return null;
+}
+
+document.addEventListener("mouseover", (e) => {
+  const el = findTipTarget(e.target);
+  if (!el || !S.resp) return;
+  if (el === tipTarget) {
+    positionTip(e.clientX, e.clientY);
+    return;
+  }
+  const html = buildTip(el);
+  if (!html) return;
+  tipTarget = el;
+  showTip(html, e.clientX, e.clientY, el.matches("#grid td.cell, .js-row"));
+});
+document.addEventListener("mousemove", (e) => {
+  if (!tipTarget || tipEl.classList.contains("hidden")) return;
+  if (findTipTarget(e.target) === tipTarget) positionTip(e.clientX, e.clientY);
+});
+document.addEventListener("mouseout", (e) => {
+  const from = findTipTarget(e.target);
+  const to = findTipTarget(e.relatedTarget);
+  if (from && from !== to) hideTip();
+});
+tipEl.addEventListener("mouseenter", () => clearTimeout(tipHideTimer));
+tipEl.addEventListener("mouseleave", hideTip);
+
 // Top-k [strIdx...] + probs at (layer, pos) for the current mode; layer n-1 = model.
 function topkAt(layer, pos) {
   const r = S.resp;
@@ -108,11 +377,6 @@ function rankAt(pin, layer, pos) {
   if (layer === r.n_layers - 1) return pin.ranks.model_ranks[pos];
   const li = r.lens_layers.indexOf(layer);
   return pin.ranks[S.mode === "jlens" ? "jlens_ranks" : "logit_lens_ranks"][li][pos];
-}
-function cellTitle(layer, pos) {
-  const [tk, pr] = topkAt(layer, pos);
-  const lines = tk.slice(0, 5).map((si, i) => `${i + 1}. ${JSON.stringify(S.resp.strings[si])}  ${fmtProb(pr[i])}`);
-  return `${layerLabel(layer)} @ pos ${pos} ${JSON.stringify(S.resp.strings[S.resp.prompt_tokens[pos]])}\n${lines.join("\n")}`;
 }
 
 // ---------- status + cold start ----------
@@ -139,10 +403,13 @@ async function warmup() {
   try {
     const r = await fetch(`${API}/warmup`);
     if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    if (data.limits) Object.assign(LIMITS, data.limits);
     clearTimeout(slow);
     S.ready = true;
     setStatus("ready", "ready");
     setPatience(null);
+    updateBudgetHint();
   } catch (e) {
     clearTimeout(slow);
     setStatus("error", "backend unreachable");
@@ -186,6 +453,7 @@ async function analyze() {
     S.sel = { layer: Math.round((w0 + w1) / 2), pos: hasGen ? S.resp.gen_start : P - 1 };
     $("results").classList.remove("hidden");
     $("examples").classList.add("hidden");
+    maybeKeepChatTurns();
     renderAll();
     S.ready = true;
     setStatus("ready", "ready");
@@ -301,7 +569,7 @@ function renderCompletion() {
     if (isGen(p)) cls.push("tr-gen");
     if (p === S.sel.pos) cls.push("tr-sel");
     const breaks = "<br>".repeat((s.match(/\n/g) || []).length);
-    return `<button class="${cls.join(" ")}" data-pos="${p}" title="position ${p}${isGen(p) ? " (generated)" : ""}">` +
+    return `<button class="${cls.join(" ")}" data-pos="${p}">` +
       `${esc(showTok(s))}</button>${breaks}`;
   };
 
@@ -333,7 +601,7 @@ function renderPrediction() {
     ? "model prediction · token after the output"
     : `model prediction · next token after pos ${pos}`;
   $("prediction-list").innerHTML = r.model.topk[pos].slice(0, 5).map((si, i) =>
-    `<button class="pred" data-si="${si}" title="pin this token">` +
+    `<button class="pred" data-si="${si}" data-rank="${i + 1}" data-prob="${r.model.probs[pos][i]}">` +
     `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[pos][i])}</span></button>`
   ).join("");
 }
@@ -374,11 +642,11 @@ function renderJSpace() {
     .sort((a, b) => b[1].total - a[1].total).slice(0, 40);
   const maxCell = Math.max(1, ...rows.map(([, s]) =>
     Math.max(0, ...wsIndices.map((li) => s.perLayer[li]))));
-  const stripCell = (c, li) => {
+  const stripCell = (c, li, si) => {
     const layer = r.lens_layers[li];
-    if (!c) return `<i class="js-cell is-zero" title="L${layer}: not in top-10"></i>`;
+    if (!c) return `<i class="js-cell is-zero" data-layer="${layer}" data-count="0" data-si="${si}"></i>`;
     const op = (0.25 + 0.75 * c / maxCell).toFixed(2);
-    return `<i class="js-cell" style="--cell-op:${op}" title="L${layer}: ${c}×"></i>`;
+    return `<i class="js-cell" style="--cell-op:${op}" data-layer="${layer}" data-count="${c}" data-si="${si}"></i>`;
   };
   const legend = wsIndices.length ? `<div class="js-strip-legend" aria-hidden="true">` +
     `<span class="js-tok js-tok-ghost"></span><span class="js-count"></span>` +
@@ -387,14 +655,18 @@ function renderJSpace() {
       const layer = r.lens_layers[li];
       const edge = layer === w0 || layer === w1;
       const tick = edge || layer % 4 === 0;
-      return `<i class="js-cell is-label${tick ? " has-label" : ""}" title="L${layer}">` +
+      return `<i class="js-cell is-label${tick ? " has-label" : ""}" data-layer="${layer}" data-count="0" data-si="-1">` +
         `${tick ? `<span>L${layer}</span>` : ""}</i>`;
     }).join("") +
     `</span><span class="js-actions"></span></div>` : "";
   $("jspace").innerHTML = legend + rows.map(([si, s]) => {
-    const strip = wsIndices.map((li) => stripCell(s.perLayer[li], li)).join("");
-    return `<div class="js-row">` +
-      `<button class="tok js-tok" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">${esc(showTok(r.strings[si]))}</button>` +
+    const strip = wsIndices.map((li) => stripCell(s.perLayer[li], li, si)).join("");
+    const layerData = wsIndices.map((li) => r.lens_layers[li]).join(",");
+    const countData = wsIndices.map((li) => s.perLayer[li]).join(",");
+    const rowAttrs =
+      `data-si="${si}" data-total="${s.total}" data-layers="${layerData}" data-counts="${countData}"`;
+    return `<div class="js-row" ${rowAttrs}>` +
+      `<button class="tok js-tok" data-si="${si}">${esc(showTok(r.strings[si]))}</button>` +
       `<span class="js-count">${s.total}</span>` +
       `<span class="js-strip" aria-hidden="true">${strip}</span>` +
       `<span class="js-actions">` +
@@ -420,7 +692,12 @@ function renderMeta() {
   const tokCount = hasGen
     ? `${r.gen_start} prompt + ${r.prompt_tokens.length - r.gen_start} generated`
     : `${r.prompt_tokens.length} tokens`;
-  $("meta").textContent = `${tokCount}${r.truncated ? " (truncated)" : ""} · ${secs} s`;
+  const budget = r.token_budget;
+  const budgetStr = budget
+    ? `${budget.prompt} prompt + ${budget.generated} generated (${budget.max} total)`
+    : null;
+  const parts = [tokCount, budgetStr, `${secs} s`].filter(Boolean);
+  $("meta").textContent = `${parts.join(" · ")}${r.truncated ? " (truncated)" : ""}`;
 }
 
 function setGridMode(m) {
@@ -454,23 +731,21 @@ function renderGrid() {
     for (let p = 0; p < P; p++) {
       const selCol = p === S.sel.pos ? " sel-col" : "";
       const selected = L === S.sel.layer && p === S.sel.pos ? " selected" : "";
-      const title = esc(cellTitle(L, p));
       if (usePin) {
         const rank = rankAt(pin, L, p);
-        cells.push(`<td class="cell ${rankClass(rank)}${selCol}${selected}" data-l="${L}" data-p="${p}"` +
-          ` title="${title}\nrank ${rank}">${fmtRank(rank)}</td>`);
+        cells.push(`<td class="cell ${rankClass(rank)}${selCol}${selected}" data-l="${L}" data-p="${p}">` +
+          `${fmtRank(rank)}</td>`);
       } else {
         const [tk] = topkAt(L, p);
-        cells.push(`<td class="cell${selCol}${selected}" data-l="${L}" data-p="${p}" title="${title}">` +
+        cells.push(`<td class="cell${selCol}${selected}" data-l="${L}" data-p="${p}">` +
           `${esc(showTok(r.strings[tk[0]]))}</td>`);
       }
     }
-    return `<tr class="${cls}"><th class="layer-label">${layerLabel(L)}</th>${cells.join("")}</tr>`;
+    return `<tr class="${cls}"><th class="layer-label" data-layer="${L}">${layerLabel(L)}</th>${cells.join("")}</tr>`;
   });
 
   const axis = r.prompt_tokens.map((si, p) =>
-    `<td class="axis-tok${p === S.sel.pos ? " sel-col" : ""}${isGen(p) ? " is-gen" : ""}" data-axis="${p}"` +
-    ` title="position ${p}${isGen(p) ? " (generated)" : ""}">` +
+    `<td class="axis-tok${p === S.sel.pos ? " sel-col" : ""}${isGen(p) ? " is-gen" : ""}" data-axis="${p}">` +
     `${esc(showTok(r.strings[si]))}</td>`).join("");
   rows.push(`<tr class="axis-row"><th class="layer-label">${r.completion ? "prompt + output →" : "prompt →"}</th>${axis}</tr>`);
   $("grid").style.minWidth = `${96 + 80 * P}px`;
@@ -478,11 +753,17 @@ function renderGrid() {
 }
 
 // One top-k row as grid-style <td> cells (rank order left to right).
-function tokCells(tk, pr) {
+function tokCells(tk, pr, { layer = null, pos = null } = {}) {
   const r = S.resp;
-  return tk.map((si, i) =>
-    `<td class="tok-cell${i === 0 ? " rank1" : ""}" data-si="${si}" title="pin ${esc(JSON.stringify(r.strings[si]))}">` +
-    `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></td>`).join("");
+  return tk.map((si, i) => {
+    const attrs = [
+      `data-si="${si}"`, `data-rank="${i + 1}"`, `data-prob="${pr[i]}"`,
+      layer !== null ? `data-layer="${layer}"` : "",
+      pos !== null ? `data-pos="${pos}"` : "",
+    ].filter(Boolean).join(" ");
+    return `<td class="tok-cell${i === 0 ? " rank1" : ""}" ${attrs}>` +
+      `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></td>`;
+  }).join("");
 }
 
 function stackTable(rows, k) {
@@ -508,7 +789,7 @@ function renderByLayer(autoScroll = false) {
     const [tk, pr] = topkAt(L, pos);
     k = Math.max(k, tk.length);
     return `<tr class="${bandClass(L)}${L === S.sel.layer ? " is-selected" : ""}">` +
-      `<th class="layer-label" data-layer="${L}" title="select this layer">${layerLabel(L)}</th>${tokCells(tk, pr)}</tr>`;
+      `<th class="layer-label" data-layer="${L}">${layerLabel(L)}</th>${tokCells(tk, pr, { layer: L, pos })}</tr>`;
   });
   $("by-layer").innerHTML = stackTable(rows, k);
   const sel = $("by-layer").querySelector(".is-selected");
@@ -526,9 +807,9 @@ function renderByPos(autoScroll = false) {
     const [tk, pr] = topkAt(L, p);
     k = Math.max(k, tk.length);
     rows.push(`<tr class="${p === S.sel.pos ? "is-selected" : ""}${isGen(p) ? " is-gen-row" : ""}">` +
-      `<th class="pos-label" data-pos="${p}" title="position ${p}">${p}</th>` +
-      `<th class="tok-label" data-pos="${p}" title="select position ${p}${isGen(p) ? " (generated token)" : ""}">` +
-      `${esc(showTok(r.strings[r.prompt_tokens[p]]))}</th>${tokCells(tk, pr)}</tr>`);
+      `<th class="pos-label" data-pos="${p}">${p}</th>` +
+      `<th class="tok-label" data-pos="${p}">` +
+      `${esc(showTok(r.strings[r.prompt_tokens[p]]))}</th>${tokCells(tk, pr, { pos: p })}</tr>`);
   }
   $("by-pos").innerHTML = stackTableByPos(rows, k);
   const sel = $("by-pos").querySelector(".is-selected");
@@ -636,9 +917,17 @@ $("prompt").addEventListener("keydown", (e) => {
 
 document.querySelectorAll("#examples .example").forEach((b) =>
   b.addEventListener("click", () => {
-    $("prompt").value = b.textContent;
+    $("prompt").value = b.dataset.multiturn ? "Name a different one in one word." : b.textContent;
     const chat = b.dataset.chat === "chat" ? "chat" : "raw";
     document.querySelector(`#chat-toggle [data-chat="${chat}"]`).click();
+    if (b.dataset.multiturn) {
+      try { S.chatTurns = JSON.parse(b.dataset.multiturn); } catch { S.chatTurns = []; }
+      renderChatHistory();
+    } else {
+      S.chatTurns = [];
+      renderChatHistory();
+    }
+    updateBudgetHint();
     analyze();
   }));
 
@@ -658,7 +947,119 @@ document.querySelectorAll("#chat-toggle .seg-btn").forEach((b) =>
     document.querySelectorAll("#chat-toggle .seg-btn").forEach((x) =>
       x.classList.toggle("active", x === b));
     document.body.classList.toggle("chat-mode", S.chat === "chat");
+    $("chat-history-panel").classList.toggle("hidden", S.chat !== "chat");
+    updateChatControls();
+    $("prompt").placeholder = S.chat === "chat"
+      ? "Your message (latest user turn)…"
+      : "Type a prompt…";
+    updateBudgetHint();
   }));
+
+// ---------- chat multi-turn + token budget ----------
+
+function estPromptTokens() {
+  let n = Math.ceil($("prompt").value.length / 3.2);
+  n += Math.ceil(($("system-prompt").value || "").length / 3.2);
+  n += Math.ceil(($("prefill").value || "").length / 3.2);
+  for (const t of S.chatTurns) n += Math.ceil(t.content.length / 3.2);
+  if (S.chat === "chat") n += 24 + S.chatTurns.length * 18; // template overhead
+  return n;
+}
+
+function refineGenOptions(room) {
+  const sel = $("gen-len");
+  const maxGen = Math.max(0, Math.min(LIMITS.max_new, room));
+  let picked = +sel.value;
+  for (const opt of sel.options) {
+    const v = +opt.value;
+    opt.disabled = v > 0 && v > maxGen;
+  }
+  if (picked > maxGen) {
+    const allowed = [...sel.options].filter((o) => !o.disabled).map((o) => +o.value);
+    picked = allowed.length ? Math.max(...allowed) : 0;
+    sel.value = String(picked);
+  }
+  return maxGen;
+}
+
+function updateBudgetHint() {
+  const hint = $("budget-hint");
+  const est = estPromptTokens();
+  const room = Math.max(0, LIMITS.max_sequence - est);
+  const avail = refineGenOptions(room);
+  if (est > LIMITS.max_sequence) {
+    hint.textContent = `~${est} tokens estimated — ${LIMITS.max_sequence} sequence limit exceeded`;
+  } else if (S.chat === "chat" && S.chatTurns.length) {
+    hint.textContent = `${S.chatTurns.length} prior turn${S.chatTurns.length === 1 ? "" : "s"} · ~${est}/${LIMITS.max_sequence} tokens · ${avail} generation tokens available`;
+  } else if (est > LIMITS.max_sequence - 16) {
+    hint.textContent = `~${est}/${LIMITS.max_sequence} tokens used · ${avail} generation tokens available`;
+  } else {
+    hint.textContent = `${LIMITS.max_sequence}-token sequence · up to ${avail} generation tokens`;
+  }
+  hint.classList.toggle("is-warn", est > LIMITS.max_sequence);
+}
+
+function renderChatHistory() {
+  const el = $("chat-history");
+  const roleLabel = { user: "You", assistant: "Assistant" };
+  if (!S.chatTurns.length) {
+    el.innerHTML = '<p class="chat-history-empty">no prior turns yet — analyze with &ldquo;keep turns&rdquo; checked to build a conversation</p>';
+    updateChatControls();
+    return;
+  }
+  el.innerHTML = S.chatTurns.map((t, i) =>
+    `<div class="chat-turn tr-${t.role}">` +
+    `<span class="chat-turn-role">${roleLabel[t.role] || t.role}</span>` +
+    `<span class="chat-turn-text">${esc(t.content)}</span>` +
+    `<button type="button" class="chat-turn-rm" data-i="${i}" aria-label="remove this turn">×</button></div>`
+  ).join("");
+  updateChatControls();
+}
+
+function updateChatControls() {
+  const inChat = S.chat === "chat";
+  $("prompt-chat-actions").classList.toggle("hidden", !inChat);
+  const hasTurns = S.chatTurns.length > 0;
+  const clearBtn = $("chat-clear");
+  clearBtn.disabled = !hasTurns;
+  const count = $("chat-turn-count");
+  if (inChat && hasTurns) {
+    count.textContent = `${S.chatTurns.length} turn${S.chatTurns.length === 1 ? "" : "s"}`;
+    count.classList.remove("hidden");
+  } else {
+    count.textContent = "";
+    count.classList.add("hidden");
+  }
+}
+
+function clearChatTurns() {
+  S.chatTurns = [];
+  renderChatHistory();
+  updateBudgetHint();
+}
+
+function maybeKeepChatTurns() {
+  if (S.chat !== "chat" || !$("chat-keep").checked) return;
+  const userMsg = (S.params?.prompt || "").trim();
+  if (userMsg) S.chatTurns.push({ role: "user", content: userMsg });
+  if (S.resp?.completion) S.chatTurns.push({ role: "assistant", content: S.resp.completion });
+  $("prompt").value = "";
+  renderChatHistory();
+  updateBudgetHint();
+}
+
+$("chat-clear").addEventListener("click", clearChatTurns);
+$("chat-history").addEventListener("click", (e) => {
+  const rm = e.target.closest(".chat-turn-rm");
+  if (!rm) return;
+  S.chatTurns.splice(+rm.dataset.i, 1);
+  renderChatHistory();
+  updateBudgetHint();
+});
+for (const id of ["prompt", "system-prompt", "prefill", "gen-len"]) {
+  $(id).addEventListener("input", updateBudgetHint);
+  $(id).addEventListener("change", updateBudgetHint);
+}
 
 $("advanced-toggle").addEventListener("click", () => {
   const adv = $("advanced");
@@ -808,3 +1209,5 @@ $("pin-form").addEventListener("submit", (e) => {
 });
 
 warmup();
+renderChatHistory();
+updateBudgetHint();
