@@ -101,6 +101,63 @@ function scrollStackToRow(stackEl, rowEl) {
   else if (rowBottom > viewBottom) stackEl.scrollTop = rowBottom - stackEl.clientHeight;
 }
 
+// Pinned-token rank at (layer, pos) for the current mode.
+function rankAt(pin, layer, pos) {
+  const r = S.resp;
+  if (layer === r.n_layers - 1) return pin.ranks.model_ranks[pos];
+  const li = r.lens_layers.indexOf(layer);
+  return pin.ranks[S.mode === "jlens" ? "jlens_ranks" : "logit_lens_ranks"][li][pos];
+}
+function pinStateForSi(si) {
+  if (!S.resp) return null;
+  const tokenId = S.resp.token_ids[si];
+  const i = S.pins.findIndex((p) => p.tokenId === tokenId && p.ranks);
+  if (i < 0) return null;
+  return { index: i, hidden: !!S.pins[i].chartHidden };
+}
+function tracedMarkup(si) {
+  const ps = pinStateForSi(si);
+  if (!ps) return { cls: "", style: "" };
+  const color = pinColor(S.pins[ps.index]);
+  return {
+    cls: ps.hidden ? " is-traced-hidden" : " is-traced",
+    style: ` style="--trace-color:${color}"`,
+  };
+}
+function traceTipFoot(si) {
+  const ps = pinStateForSi(si);
+  if (!ps) return "click to trace on chart";
+  return ps.hidden ? "click to show on chart" : "click to hide from chart";
+}
+function tipAccentFor(el) {
+  if (el.matches(".chart-point")) {
+    const pin = S.pins[+el.dataset.pin];
+    return pin ? pinColor(pin) : null;
+  }
+  if (el.matches(".stack-table td.tok-cell, .pred, .js-tok")) {
+    const si = +el.dataset.si;
+    const ps = pinStateForSi(si);
+    if (ps && !ps.hidden) return pinColor(S.pins[ps.index]);
+  }
+  if (el.matches(".pin-chip")) {
+    const pin = S.pins[+el.dataset.pin];
+    return pin && !pin.chartHidden ? pinColor(pin) : null;
+  }
+  return null;
+}
+
+function findPin({ tokenId = null, tokenStr = null }) {
+  if (tokenId !== null) {
+    const byId = S.pins.findIndex((p) => p.tokenId === tokenId);
+    if (byId >= 0) return byId;
+  }
+  if (tokenStr) {
+    const byText = S.pins.findIndex((p) => p.text === tokenStr);
+    if (byText >= 0) return byText;
+  }
+  return -1;
+}
+
 // ---------- rich hover tooltips ----------
 
 const tipEl = (() => {
@@ -154,15 +211,21 @@ function positionTip(x, y) {
   tipEl.style.left = `${left}px`;
   tipEl.style.top = `${top}px`;
 }
-function showTip(html, x, y, scrollable = false) {
+function showTip(html, x, y, opts = {}) {
+  const options = opts === true ? { scrollable: true } : opts;
   clearTimeout(tipHideTimer);
   tipEl.innerHTML = html;
-  tipEl.classList.toggle("is-scrollable", scrollable);
+  tipEl.classList.toggle("is-scrollable", !!options.scrollable);
+  tipEl.classList.toggle("is-accented", !!options.accent);
+  if (options.accent) tipEl.style.setProperty("--tip-accent", options.accent);
+  else tipEl.style.removeProperty("--tip-accent");
   requestAnimationFrame(() => positionTip(x, y));
 }
 function hideTip() {
   tipHideTimer = setTimeout(() => {
     tipEl.classList.add("hidden");
+    tipEl.classList.remove("is-accented");
+    tipEl.style.removeProperty("--tip-accent");
     tipTarget = null;
   }, 60);
 }
@@ -173,7 +236,7 @@ function tipGridCell(L, p) {
   const ctx = esc(JSON.stringify(r.strings[r.prompt_tokens[p]]));
   const pin = S.gridMode === "rank" ? S.pins[S.activePin] : null;
   let meta = `${bandBadge(L)}${modeLabel()}`;
-  let foot = "click to inspect this layer × position";
+  let foot = "click to select";
   if (pin?.ranks) {
     const rank = rankAt(pin, L, p);
     meta += `<span class="tip-badge is-rank">rank ${fmtRank(rank)}</span> for ${esc(JSON.stringify(pin.text))}`;
@@ -198,7 +261,7 @@ function tipTokCell(si, rank, prob, layer, pos) {
     `<dt>rank</dt><dd>#${rank}</dd>` +
     `<dt>prob</dt><dd>${fmtProb(prob)}</dd>` +
     `</dl>` +
-    tipFoot("click to pin this token");
+    tipFoot(traceTipFoot(si));
 }
 function tipAxisPos(p) {
   const r = S.resp;
@@ -208,7 +271,7 @@ function tipAxisPos(p) {
   return tipHead(`position ${p}`) +
     tipMeta(`token ${tok}${gen}`, `${bandBadge(S.sel.layer)}${layerLabel(S.sel.layer)} readout`) +
     tipTopkList(tk, pr, { limit: 5 }) +
-    tipFoot("click to select this position");
+    tipFoot("click to select position");
 }
 function tipLayerLabel(L) {
   const r = S.resp;
@@ -221,7 +284,7 @@ function tipLayerLabel(L) {
   return tipHead(layerLabel(L)) +
     tipMeta(`${bandBadge(L)}${region}`, `top readout at pos ${S.sel.pos} (${ctx}) · ${modeLabel()}`) +
     tipTopkList(tk, pr, { limit: 5 }) +
-    tipFoot("click to select this layer");
+    tipFoot("click to select layer");
 }
 function tipTranscriptPos(p) {
   const r = S.resp;
@@ -232,13 +295,13 @@ function tipTranscriptPos(p) {
     tipMeta(`token ${tok}`, gen) +
     tipMeta(`model next-token prediction from here`) +
     tipTopkList(tk, pr, { limit: 5 }) +
-    tipFoot("click to inspect readouts at this position");
+    tipFoot("click to inspect position");
 }
 function tipPred(si, prob, rank) {
   const r = S.resp;
   return tipHead(esc(JSON.stringify(r.strings[si]))) +
     tipMeta(`model output · pos ${S.sel.pos}`, `#${rank} · prob ${fmtProb(prob)}`) +
-    tipFoot("click to pin and trace across layers");
+    tipFoot(traceTipFoot(si));
 }
 function tipJRow(row) {
   const r = S.resp;
@@ -256,7 +319,7 @@ function tipJRow(row) {
   return tipHead(tok) +
     tipMeta(`appears in <strong>${total}</strong> workspace top-10 cells`, `L${w0}–L${w1} · ${modeLabel()}`) +
     `<div class="tip-strip">${strip}</div>` +
-    tipFoot("click token to pin · steer/swap on hover row actions");
+    tipFoot(pinStateForSi(si) ? traceTipFoot(si) : "click to pin · steer/swap on row hover");
 }
 function tipJCell(layer, count, si) {
   const r = S.resp;
@@ -264,7 +327,7 @@ function tipJCell(layer, count, si) {
   if (!count) {
     return tipHead(`L${layer}`) +
       tipMeta(`token ${tok} not in top-10 at any workspace position on this layer`) +
-      tipFoot("darker cells = more frequent across positions");
+      tipFoot("darker cells = more frequent");
   }
   return tipHead(`L${layer} · ${count}×`) +
     tipMeta(`token ${tok} in top-10 at ${count} position${count === 1 ? "" : "s"} on this layer`) +
@@ -272,11 +335,36 @@ function tipJCell(layer, count, si) {
 }
 function tipPinChip(pin, i) {
   const color = pinColor(pin);
+  const traceBadge = `<span class="tip-trace-badge" style="--trace-accent:${color}">trace ${i + 1}</span>`;
   const state = pin.loading ? "loading ranks…" :
+    pin.chartHidden ? "hidden from charts" :
     pin.ranks ? `traced across ${S.resp.n_layers} layers` : "no rank data";
   return tipHead(esc(JSON.stringify(pin.text))) +
-    tipMeta(`pin #${i + 1}`, `<span style="color:${color}">●</span> ${state}`) +
-    tipFoot(i === S.activePin ? "active pin for rank heatmap · click chip to activate" : "click chip to use for rank heatmap");
+    tipMeta(traceBadge, state) +
+    tipFoot(pin.chartHidden
+      ? "click token to show on chart"
+      : i === S.activePin ? "active for rank heatmap · click token to hide" : "click for rank heatmap");
+}
+function tipChartPoint(el) {
+  const pinIdx = +el.dataset.pin;
+  const pin = S.pins[pinIdx];
+  if (!pin) return null;
+  const color = pinColor(pin);
+  const rank = +el.dataset.rank;
+  const tok = esc(JSON.stringify(pin.text));
+  const traceBadge = `<span class="tip-trace-badge" style="--trace-accent:${color}">trace ${pinIdx + 1}</span>`;
+  if (el.dataset.chart === "layer") {
+    const L = +el.dataset.layer;
+    const ctx = esc(JSON.stringify(S.resp.strings[S.resp.prompt_tokens[S.sel.pos]]));
+    return tipHead(tok) +
+      tipMeta(traceBadge, `${bandBadge(L)}${layerLabel(L)} @ pos ${S.sel.pos}`, `context ${ctx} · ${modeLabel()}`) +
+      `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRank(rank)}</dd></dl>`;
+  }
+  const p = +el.dataset.pos;
+  const ctx = esc(JSON.stringify(S.resp.strings[S.resp.prompt_tokens[p]]));
+  return tipHead(tok) +
+    tipMeta(traceBadge, `${bandBadge(S.sel.layer)}${layerLabel(S.sel.layer)} @ pos ${p}`, `context ${ctx} · ${modeLabel()}`) +
+    `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRank(rank)}</dd></dl>`;
 }
 
 function findTipTarget(el) {
@@ -285,7 +373,7 @@ function findTipTarget(el) {
     "#grid td.cell, #grid td.axis-tok, #grid th.layer-label, " +
     ".stack-table td.tok-cell, .stack-table th.layer-label, " +
     ".by-pos-table th.pos-label, .by-pos-table th.tok-label, " +
-    ".tr-tok, .pred, .js-row, .js-cell, .pin-chip, #prediction-list .pred"
+    ".tr-tok, .pred, .js-row-body, .js-cell, .pin-chip, #prediction-list .pred, .chart-point"
   );
 }
 
@@ -323,7 +411,7 @@ function buildTip(el) {
     const prob = +el.dataset.prob;
     return tipPred(si, prob, rank);
   }
-  if (el.matches(".js-row")) {
+  if (el.matches(".js-row-body")) {
     return tipJRow(el);
   }
   if (el.matches(".js-cell")) {
@@ -336,6 +424,9 @@ function buildTip(el) {
   if (el.matches(".pin-chip")) {
     const pin = S.pins[+el.dataset.pin];
     if (pin) return tipPinChip(pin, +el.dataset.pin);
+  }
+  if (el.matches(".chart-point")) {
+    return tipChartPoint(el);
   }
   return null;
 }
@@ -350,7 +441,10 @@ document.addEventListener("mouseover", (e) => {
   const html = buildTip(el);
   if (!html) return;
   tipTarget = el;
-  showTip(html, e.clientX, e.clientY, el.matches("#grid td.cell, .js-row"));
+  showTip(html, e.clientX, e.clientY, {
+    scrollable: el.matches("#grid td.cell, .js-row-body"),
+    accent: tipAccentFor(el),
+  });
 });
 document.addEventListener("mousemove", (e) => {
   if (!tipTarget || tipEl.classList.contains("hidden")) return;
@@ -370,13 +464,6 @@ function topkAt(layer, pos) {
   if (layer === r.n_layers - 1) return [r.model.topk[pos], r.model.probs[pos]];
   const li = r.lens_layers.indexOf(layer);
   return [r[S.mode].topk[li][pos], r[S.mode].probs[li][pos]];
-}
-// Pinned-token rank at (layer, pos) for the current mode.
-function rankAt(pin, layer, pos) {
-  const r = S.resp;
-  if (layer === r.n_layers - 1) return pin.ranks.model_ranks[pos];
-  const li = r.lens_layers.indexOf(layer);
-  return pin.ranks[S.mode === "jlens" ? "jlens_ranks" : "logit_lens_ranks"][li][pos];
 }
 
 // ---------- status + cold start ----------
@@ -428,7 +515,7 @@ async function analyze() {
   btn.textContent = "reading…";
   $("error-banner").classList.add("hidden");
   const slow = setTimeout(() => {
-    if (!S.ready) setPatience("Still waking the GPU — your prompt is queued and will run the moment it's up.");
+    if (!S.ready) setPatience("Still waking the GPU · your prompt is queued and will run when it's up.");
   }, 2500);
   const t0 = performance.now();
   try {
@@ -471,15 +558,36 @@ async function analyze() {
 
 // ---------- pinning ----------
 
+function refreshPinViews() {
+  renderPins();
+  renderGrid();
+  renderCharts();
+  renderByLayer();
+  renderByPos();
+}
+
+function togglePinChart(i) {
+  const pin = S.pins[i];
+  if (!pin?.ranks) return;
+  pin.chartHidden = !pin.chartHidden;
+  S.activePin = i;
+  refreshPinViews();
+}
+
 async function pinToken({ tokenId = null, tokenStr = null }) {
-  const existing = S.pins.findIndex((p) => tokenId !== null && p.tokenId === tokenId);
-  if (existing >= 0) { S.activePin = existing; renderPins(); renderGrid(); renderCharts(); return; }
+  const existing = findPin({ tokenId, tokenStr });
+  if (existing >= 0) {
+    const pin = S.pins[existing];
+    if (pin.loading) { S.activePin = existing; renderPins(); return; }
+    if (pin.ranks) { togglePinChart(existing); return; }
+  }
   const pin = {
     tokenId,
     text: tokenStr ?? S.resp.strings[S.resp.token_ids.indexOf(tokenId)] ?? "",
     colorIdx: S.pins.length,
     ranks: null,
     loading: true,
+    chartHidden: false,
   };
   S.pins.push(pin);
   S.activePin = S.pins.length - 1;
@@ -504,12 +612,11 @@ async function pinToken({ tokenId = null, tokenStr = null }) {
     pin.tokenId = data.token_id;
     pin.text = data.token_text;
     pin.loading = false;
+    pin.chartHidden = false;
     $("rank-legend").classList.remove("hidden");
     document.querySelector('#grid-mode [data-grid="rank"]').disabled = false;
     if (S.gridMode === "argmax") setGridMode("rank");
-    renderPins();
-    renderGrid();
-    renderCharts();
+    refreshPinViews();
   } catch (e) {
     S.pins = S.pins.filter((p) => p !== pin);
     S.activePin = S.pins.length - 1;
@@ -531,6 +638,8 @@ function unpin(i) {
   renderPins();
   renderGrid();
   renderCharts();
+  renderByLayer();
+  renderByPos();
 }
 
 // ---------- rendering ----------
@@ -589,8 +698,8 @@ function renderCompletion() {
   close();
   $("completion").innerHTML = bubbles.join("");
   $("completion-label").innerHTML = isChat
-    ? 'transcript <span class="hint">&mdash; the exact token sequence the lens reads; click any token to inspect it below</span>'
-    : 'prompt + model output <span class="hint">&mdash; greedy continuation highlighted; click any token to inspect it below</span>';
+    ? 'transcript <span class="hint">&mdash; exact token sequence; click any token to inspect</span>'
+    : 'prompt + model output <span class="hint">&mdash; greedy continuation highlighted; click any token to inspect</span>';
 }
 
 function renderPrediction() {
@@ -600,10 +709,11 @@ function renderPrediction() {
   $("prediction-label").textContent = isLast && r.completion
     ? "model prediction · token after the output"
     : `model prediction · next token after pos ${pos}`;
-  $("prediction-list").innerHTML = r.model.topk[pos].slice(0, 5).map((si, i) =>
-    `<button class="pred" data-si="${si}" data-rank="${i + 1}" data-prob="${r.model.probs[pos][i]}">` +
-    `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[pos][i])}</span></button>`
-  ).join("");
+  $("prediction-list").innerHTML = r.model.topk[pos].slice(0, 5).map((si, i) => {
+    const trace = tracedMarkup(si);
+    return `<button class="pred${trace.cls}"${trace.style} data-si="${si}" data-rank="${i + 1}" data-prob="${r.model.probs[pos][i]}">` +
+      `<span>${esc(showTok(r.strings[si]))}</span><span class="p">${fmtProb(r.model.probs[pos][i])}</span></button>`;
+  }).join("");
 }
 
 // ---------- J-Space aggregate (neuronpedia-style count view) ----------
@@ -649,6 +759,7 @@ function renderJSpace() {
     return `<i class="js-cell" style="--cell-op:${op}" data-layer="${layer}" data-count="${c}" data-si="${si}"></i>`;
   };
   const legend = wsIndices.length ? `<div class="js-strip-legend" aria-hidden="true">` +
+    `<div class="js-row-body">` +
     `<span class="js-tok js-tok-ghost"></span><span class="js-count"></span>` +
     `<span class="js-strip">` +
     wsIndices.map((li) => {
@@ -658,17 +769,20 @@ function renderJSpace() {
       return `<i class="js-cell is-label${tick ? " has-label" : ""}" data-layer="${layer}" data-count="0" data-si="-1">` +
         `${tick ? `<span>L${layer}</span>` : ""}</i>`;
     }).join("") +
-    `</span><span class="js-actions"></span></div>` : "";
+    `</span></div><span class="js-actions"></span></div>` : "";
   $("jspace").innerHTML = legend + rows.map(([si, s]) => {
     const strip = wsIndices.map((li) => stripCell(s.perLayer[li], li, si)).join("");
     const layerData = wsIndices.map((li) => r.lens_layers[li]).join(",");
     const countData = wsIndices.map((li) => s.perLayer[li]).join(",");
     const rowAttrs =
       `data-si="${si}" data-total="${s.total}" data-layers="${layerData}" data-counts="${countData}"`;
-    return `<div class="js-row" ${rowAttrs}>` +
-      `<button class="tok js-tok" data-si="${si}">${esc(showTok(r.strings[si]))}</button>` +
+    const trace = tracedMarkup(si);
+    return `<div class="js-row">` +
+      `<div class="js-row-body" ${rowAttrs}>` +
+      `<button class="tok js-tok${trace.cls}"${trace.style} data-si="${si}">${esc(showTok(r.strings[si]))}</button>` +
       `<span class="js-count">${s.total}</span>` +
       `<span class="js-strip" aria-hidden="true">${strip}</span>` +
+      `</div>` +
       `<span class="js-actions">` +
       `<button class="mini-btn" data-iv="steer" data-si="${si}">steer</button>` +
       `<button class="mini-btn" data-iv="swap" data-si="${si}">swap</button>` +
@@ -678,7 +792,7 @@ function renderJSpace() {
 
 function renderPins() {
   $("pins").innerHTML = S.pins.map((p, i) =>
-    `<span class="pin-chip ${p.loading ? "loading" : ""} ${i === S.activePin ? "active-pin" : ""}"` +
+    `<span class="pin-chip ${p.loading ? "loading" : ""} ${p.chartHidden ? "chart-hidden" : ""} ${i === S.activePin ? "active-pin" : ""}"` +
     ` style="border-color:${pinColor(p)};color:${pinColor(p)}" data-pin="${i}">` +
     `${esc(showTok(p.text))}${p.loading ? " …" : ""}` +
     `<button class="x" data-unpin="${i}" aria-label="unpin">×</button></span>`
@@ -689,15 +803,13 @@ function renderMeta() {
   const r = S.resp;
   const secs = ((r.client_ms ?? r.timing_ms.total) / 1000).toFixed(1);
   const hasGen = r.gen_start !== undefined && r.gen_start < r.prompt_tokens.length;
-  const tokCount = hasGen
-    ? `${r.gen_start} prompt + ${r.prompt_tokens.length - r.gen_start} generated`
-    : `${r.prompt_tokens.length} tokens`;
   const budget = r.token_budget;
-  const budgetStr = budget
-    ? `${budget.prompt} prompt + ${budget.generated} generated (${budget.max} total)`
-    : null;
-  const parts = [tokCount, budgetStr, `${secs} s`].filter(Boolean);
-  $("meta").textContent = `${parts.join(" · ")}${r.truncated ? " (truncated)" : ""}`;
+  const tokStr = budget
+    ? `${budget.prompt} prompt + ${budget.generated} gen (${budget.max} max)`
+    : hasGen
+      ? `${r.gen_start} prompt + ${r.prompt_tokens.length - r.gen_start} gen`
+      : `${r.prompt_tokens.length} tokens`;
+  $("meta").textContent = `${tokStr} · ${secs} s${r.truncated ? " · truncated" : ""}`;
 }
 
 function setGridMode(m) {
@@ -756,12 +868,13 @@ function renderGrid() {
 function tokCells(tk, pr, { layer = null, pos = null } = {}) {
   const r = S.resp;
   return tk.map((si, i) => {
+    const trace = tracedMarkup(si);
     const attrs = [
       `data-si="${si}"`, `data-rank="${i + 1}"`, `data-prob="${pr[i]}"`,
       layer !== null ? `data-layer="${layer}"` : "",
       pos !== null ? `data-pos="${pos}"` : "",
     ].filter(Boolean).join(" ");
-    return `<td class="tok-cell${i === 0 ? " rank1" : ""}" ${attrs}>` +
+    return `<td class="tok-cell${i === 0 ? " rank1" : ""}${trace.cls}"${trace.style} ${attrs}>` +
       `${esc(showTok(r.strings[si]))}<span class="p">${fmtProb(pr[i])}</span></td>`;
   }).join("");
 }
@@ -852,10 +965,27 @@ function rankY(r) {
   return CH.t + ih - (Math.log10(Math.max(r, 1)) / RMAX) * ih;
 }
 
+function chartTrace(pin, pinIdx, points, hitMeta) {
+  const color = pinColor(pin);
+  const linePts = points.map(([cx, cy]) => `${cx},${cy}`).join(" ");
+  const dots = points.map(([cx, cy], i) => {
+    const m = hitMeta[i];
+    const attrs = [
+      `class="chart-point"`, `cx="${cx}"`, `cy="${cy}"`, `r="6"`,
+      `data-pin="${pinIdx}"`, `data-chart="${m.chart}"`, `data-rank="${m.rank}"`,
+      m.layer !== undefined ? `data-layer="${m.layer}"` : "",
+      m.pos !== undefined ? `data-pos="${m.pos}"` : "",
+    ].filter(Boolean).join(" ");
+    return `<circle ${attrs} style="--point-color:${color}"/>`;
+  }).join("");
+  return `<polyline class="rankline" stroke="${color}" points="${linePts}"/>${dots}`;
+}
+
 function renderCharts() {
   const r = S.resp;
   if (!r) return;
-  const ready = S.pins.filter((p) => p.ranks);
+  const traced = S.pins.filter((p) => p.ranks);
+  const visible = traced.filter((p) => !p.chartHidden);
 
   // rank vs layer at selected position
   {
@@ -866,12 +996,27 @@ function renderCharts() {
     const [w0, w1] = r.workspace_band;
     const ticks = [0, 8, 16, 24, 31].map((L) => [x(L), `L${L}`]);
     const parts = chartFrame(w, ticks, "layer →", [x(w0), x(w1)]);
-    for (const pin of ready) {
-      const pts = r.lens_layers.map((L) => `${x(L)},${rankY(rankAt(pin, L, S.sel.pos))}`);
-      pts.push(`${x(n - 1)},${rankY(pin.ranks.model_ranks[S.sel.pos])}`);
-      parts.push(`<polyline class="rankline" stroke="${pinColor(pin)}" points="${pts.join(" ")}"/>`);
+    for (const pin of visible) {
+      const pinIdx = S.pins.indexOf(pin);
+      const points = [];
+      const meta = [];
+      for (const L of r.lens_layers) {
+        const rank = rankAt(pin, L, S.sel.pos);
+        points.push([x(L), rankY(rank)]);
+        meta.push({ chart: "layer", layer: L, rank });
+      }
+      const outL = n - 1;
+      const outRank = pin.ranks.model_ranks[S.sel.pos];
+      points.push([x(outL), rankY(outRank)]);
+      meta.push({ chart: "layer", layer: outL, rank: outRank });
+      parts.push(chartTrace(pin, pinIdx, points, meta));
     }
-    if (!ready.length) parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">pin a token to trace its rank across layers</text>`);
+    if (!visible.length) {
+      const msg = traced.length
+        ? "all traces hidden · click a pinned token to show"
+        : "pin a token to trace its rank across layers";
+      parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">${msg}</text>`);
+    }
     $("chart-layer").innerHTML = parts.join("");
   }
 
@@ -885,12 +1030,23 @@ function renderCharts() {
     const ticks = [];
     for (let p = 0; p < P; p += step) ticks.push([x(p), String(p)]);
     const parts = chartFrame(w, ticks, "position →", null);
-    for (const pin of ready) {
-      const pts = [];
-      for (let p = 0; p < P; p++) pts.push(`${x(p)},${rankY(rankAt(pin, S.sel.layer, p))}`);
-      parts.push(`<polyline class="rankline" stroke="${pinColor(pin)}" points="${pts.join(" ")}"/>`);
+    for (const pin of visible) {
+      const pinIdx = S.pins.indexOf(pin);
+      const points = [];
+      const meta = [];
+      for (let p = 0; p < P; p++) {
+        const rank = rankAt(pin, S.sel.layer, p);
+        points.push([x(p), rankY(rank)]);
+        meta.push({ chart: "pos", pos: p, rank });
+      }
+      parts.push(chartTrace(pin, pinIdx, points, meta));
     }
-    if (!ready.length) parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">pin a token to trace its rank across positions</text>`);
+    if (!visible.length) {
+      const msg = traced.length
+        ? "all traces hidden · click a pinned token to show"
+        : "pin a token to trace its rank across positions";
+      parts.push(`<text class="empty-note" x="${CH.l + 10}" y="${CH.t + 16}">${msg}</text>`);
+    }
     $("chart-pos").innerHTML = parts.join("");
   }
 }
@@ -988,13 +1144,11 @@ function updateBudgetHint() {
   const room = Math.max(0, LIMITS.max_sequence - est);
   const avail = refineGenOptions(room);
   if (est > LIMITS.max_sequence) {
-    hint.textContent = `~${est} tokens estimated — ${LIMITS.max_sequence} sequence limit exceeded`;
-  } else if (S.chat === "chat" && S.chatTurns.length) {
-    hint.textContent = `${S.chatTurns.length} prior turn${S.chatTurns.length === 1 ? "" : "s"} · ~${est}/${LIMITS.max_sequence} tokens · ${avail} generation tokens available`;
-  } else if (est > LIMITS.max_sequence - 16) {
-    hint.textContent = `~${est}/${LIMITS.max_sequence} tokens used · ${avail} generation tokens available`;
+    hint.textContent = `over ${LIMITS.max_sequence} token limit (~${est} estimated)`;
+  } else if (est > LIMITS.max_sequence - 24) {
+    hint.textContent = `~${est} / ${LIMITS.max_sequence} tokens · up to ${avail} new`;
   } else {
-    hint.textContent = `${LIMITS.max_sequence}-token sequence · up to ${avail} generation tokens`;
+    hint.textContent = `${LIMITS.max_sequence} token limit · up to ${avail} new`;
   }
   hint.classList.toggle("is-warn", est > LIMITS.max_sequence);
 }
@@ -1003,7 +1157,7 @@ function renderChatHistory() {
   const el = $("chat-history");
   const roleLabel = { user: "You", assistant: "Assistant" };
   if (!S.chatTurns.length) {
-    el.innerHTML = '<p class="chat-history-empty">no prior turns yet — analyze with &ldquo;keep turns&rdquo; checked to build a conversation</p>';
+    el.innerHTML = '<p class="chat-history-empty">no prior turns · check &ldquo;keep history&rdquo; to build a thread</p>';
     updateChatControls();
     return;
   }
@@ -1130,7 +1284,7 @@ async function runIntervention() {
     banner.classList.remove("hidden");
   } finally {
     btn.disabled = false;
-    btn.textContent = "Run intervention";
+    btn.textContent = "run intervention";
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "j-lens-visualizer",
-  "version": "0.2.12",
+  "version": "0.2.24",
   "private": true,
   "type": "module",
   "scripts": {

@@ -3,7 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>J-Lens Visualizer · Qwen3.5-4B</title>
+<title>J-Lens Visualizer — Jacobian Lens for Qwen3.5-4B</title>
+<meta name="description" content="Interactive Jacobian lens explorer for Qwen3.5-4B. Per-layer readouts, logit-lens comparison, pinned-token rank heatmaps, swap/steer interventions, and J-Space decomposition.">
+<meta name="author" content="Idhant Gulati">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="application-name" content="J-Lens Visualizer">
+<meta name="keywords" content="Jacobian lens, J-lens, logit lens, mechanistic interpretability, language model, Qwen3.5-4B, transformer, global workspace, residual stream, LLM visualization">
+<link rel="canonical" href="https://j-lens.idhant.xyz/">
+<link rel="me" href="https://idhant.xyz">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#fffdfa">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://j-lens.idhant.xyz/">
+<meta property="og:site_name" content="J-Lens Visualizer">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="J-Lens Visualizer — Jacobian Lens for Qwen3.5-4B">
+<meta property="og:description" content="Interactive Jacobian lens explorer for Qwen3.5-4B. Per-layer readouts, logit-lens comparison, pinned-token rank heatmaps, swap/steer interventions, and J-Space decomposition.">
+<meta property="og:image" content="https://j-lens.idhant.xyz/og-image.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="J-Lens Visualizer — per-layer readout explorer for Qwen3.5-4B">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@idhantgulati">
+<meta name="twitter:creator" content="@idhantgulati">
+<meta name="twitter:title" content="J-Lens Visualizer — Jacobian Lens for Qwen3.5-4B">
+<meta name="twitter:description" content="Interactive Jacobian lens explorer for Qwen3.5-4B. Per-layer readouts, logit-lens comparison, pinned-token rank heatmaps, swap/steer interventions, and J-Space decomposition.">
+<meta name="twitter:image" content="https://j-lens.idhant.xyz/og-image.jpg">
+<meta name="twitter:image:alt" content="J-Lens Visualizer — per-layer readout explorer for Qwen3.5-4B">
 <script>
 (function () {
   var t = localStorage.getItem("jlens-theme");
@@ -13,7 +45,64 @@
 })();
 </script>
 <link rel="preload" href="fonts/Satoshi-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="stylesheet" href="style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://j-lens.idhant.xyz/#website",
+      "url": "https://j-lens.idhant.xyz/",
+      "name": "J-Lens Visualizer",
+      "description": "Interactive Jacobian lens explorer for Qwen3.5-4B — per-layer readouts, rank heatmaps, and residual-stream interventions.",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://j-lens.idhant.xyz/#author" }
+    },
+    {
+      "@type": "WebApplication",
+      "@id": "https://j-lens.idhant.xyz/#app",
+      "name": "J-Lens Visualizer",
+      "url": "https://j-lens.idhant.xyz/",
+      "description": "Explore what Qwen3.5-4B is verbalizably holding at every transformer layer using the Jacobian lens. Compare against the logit lens, pin tokens to trace rank trajectories, run swap/steer interventions, and inspect J-Space decomposition.",
+      "applicationCategory": "ResearchApplication",
+      "operatingSystem": "Any",
+      "browserRequirements": "Requires JavaScript",
+      "softwareVersion": "0.2.24",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@id": "https://j-lens.idhant.xyz/#author" },
+      "about": { "@id": "https://j-lens.idhant.xyz/#paper" },
+      "featureList": [
+        "Per-layer Jacobian lens readout",
+        "Logit lens baseline comparison",
+        "Pinned-token rank heatmaps",
+        "Residual-stream swap and steer interventions",
+        "J-Space workspace decomposition",
+        "Greedy generation with live lens extension"
+      ],
+      "screenshot": "https://j-lens.idhant.xyz/og-image.jpg"
+    },
+    {
+      "@type": "Person",
+      "@id": "https://j-lens.idhant.xyz/#author",
+      "name": "Idhant Gulati",
+      "url": "https://idhant.xyz"
+    },
+    {
+      "@type": "ScholarlyArticle",
+      "@id": "https://j-lens.idhant.xyz/#paper",
+      "name": "Verbalizable Representations Form a Global Workspace in Language Models",
+      "author": { "@type": "Organization", "name": "Gurnee et al." },
+      "datePublished": "2026",
+      "url": "https://transformer-circuits.pub/2026/workspace/index.html",
+      "isPartOf": { "@type": "Periodical", "name": "Transformer Circuits Thread" }
+    }
+  ]
+}
+</script>
 <script type="importmap">
 {
   "imports": {
@@ -21,7 +110,6 @@
   }
 }
 </script>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128301;</text></svg>">
 <script>
 window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu: false } };
 </script>
@@ -41,7 +129,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     <div id="status" class="status" title="The GPU falls asleep when idle; the first request wakes it.">
       <span class="status-dot"></span><span id="status-text">connecting&hellip;</span>
     </div>
-    <button id="theme-toggle" class="theme-toggle" aria-label="toggle dark mode" title="toggle dark mode">
+    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
       <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
       </svg>
@@ -52,14 +140,16 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
   </div>
 </header>
 
+<main id="app">
+
 <section class="run-config">
   <div class="run-config-group">
     <div class="seg small" id="chat-toggle" role="tablist" aria-label="Prompt format">
       <button class="seg-btn active" data-chat="raw" role="tab" title="The text is fed to the model verbatim">raw text</button>
       <button class="seg-btn" data-chat="chat" role="tab" title="Qwen chat template with optional multi-turn history (thinking disabled)">chat</button>
     </div>
-    <label class="cfg-label cfg-gen" for="gen-len" title="Maximum new tokens the model may write (greedy). Prompt + generation share a 320-token sequence limit.">
-      <span class="cfg-label-text">max gen tokens</span>
+    <label class="cfg-label cfg-gen" for="gen-len" title="How many tokens the model may write after the prompt. Prompt and generation share a 320-token limit.">
+      <span class="cfg-label-text">new tokens</span>
       <select id="gen-len">
         <option value="0">0</option>
         <option value="16" selected>16</option>
@@ -78,30 +168,32 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     <label class="adv-field">system prompt <span class="adv-hint">chat mode only</span>
       <input id="system-prompt" placeholder="e.g. Answer in one word." autocomplete="off">
     </label>
-    <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only &mdash; the model&rsquo;s reply starts with this</span>
+    <label class="adv-field">prefill assistant <span class="adv-hint">chat mode only · reply starts with this</span>
       <input id="prefill" placeholder='e.g. "The answer is' autocomplete="off">
     </label>
   </section>
 
   <section id="chat-history-panel" class="chat-history-panel hidden">
     <div class="chat-history-head">
-      <span class="chat-history-label">conversation</span>
+      <span class="chat-history-label">Conversation</span>
       <span id="chat-turn-count" class="chat-turn-count hidden"></span>
     </div>
     <div id="chat-history" class="chat-history"></div>
   </section>
 
   <section class="prompt-row">
-    <textarea id="prompt" rows="2" spellcheck="false"
-      placeholder="Type a prompt&hellip;"></textarea>
-    <div class="prompt-controls">
-      <button id="analyze-btn" title="Return runs &middot; Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
-      <div id="prompt-chat-actions" class="prompt-chat-actions hidden">
-        <button id="chat-clear" type="button" class="ghost-btn chat-clear-btn" disabled title="Remove all prior turns from this conversation">Clear conversation</button>
-        <label class="cfg-label chat-keep" title="After analyze, append your message and the model reply to the history above">
-          <input type="checkbox" id="chat-keep" checked> keep turns
+    <div class="prompt-compose">
+      <textarea id="prompt" rows="2" spellcheck="false"
+        placeholder="Type a prompt&hellip;"></textarea>
+      <div id="prompt-chat-actions" class="prompt-chat-bar hidden">
+        <label class="chat-keep" title="After analyze, append your message and the model reply to the history above">
+          <input type="checkbox" id="chat-keep" checked> keep history
         </label>
+        <button id="chat-clear" type="button" class="chat-clear-btn" disabled title="Remove all prior turns">clear</button>
       </div>
+    </div>
+    <div class="prompt-controls">
+      <button id="analyze-btn" title="Return runs · Shift+Return for a new line">Analyze <kbd class="key-hint">&#9166;</kbd></button>
       <div class="seg" id="mode-toggle" role="tablist" aria-label="Lens mode">
         <button class="seg-btn active" data-mode="jlens" role="tab">J-lens</button>
         <button class="seg-btn" data-mode="logit_lens" role="tab">logit lens</button>
@@ -127,17 +219,17 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 <section id="results" class="hidden">
 
   <div class="card hidden" id="completion-card">
-    <div class="card-label" id="completion-label">transcript <span class="hint">&mdash; the exact token sequence the lens reads; click any token to inspect it below</span></div>
+    <div class="card-label" id="completion-label">transcript <span class="hint">&mdash; exact token sequence; click any token to inspect</span></div>
     <div id="completion" class="transcript"></div>
   </div>
 
   <div class="summary-row">
     <div class="card" id="prediction-card">
-      <div class="card-label" id="prediction-label">model prediction &middot; next token</div>
+      <div class="card-label" id="prediction-label">model prediction · next token</div>
       <div id="prediction-list" class="prediction-list"></div>
     </div>
     <div class="card" id="pins-card">
-      <div class="card-label">pinned tokens <span class="hint">&mdash; click any token below to trace it across every layer</span></div>
+      <div class="card-label">pinned tokens <span class="hint">&mdash; click any token to trace across layers</span></div>
       <div class="pins-line">
         <div id="pins" class="pins"></div>
         <form id="pin-form"><input id="pin-input" placeholder="pin any text&hellip;" autocomplete="off"><button type="submit" class="ghost-btn">pin</button></form>
@@ -150,11 +242,11 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
   <div class="panel" id="jspace-panel">
     <div class="panel-head">
-      <h2>J-Space &middot; what the workspace is holding</h2>
-      <label class="cfg-label js-filter" title="Template tokens (&lt;|im_end|&gt;, &lt;/think&gt;) and pure-punctuation tokens also live in the workspace &mdash; often marking turn structure and formatting state">
+      <h2>J-Space · what the workspace is holding</h2>
+      <label class="cfg-label js-filter" title="Template tokens (&lt;|im_end|&gt;, &lt;/think&gt;) and pure-punctuation tokens also live in the workspace · often marking turn structure and formatting state">
         <input type="checkbox" id="js-show-all"> include special &amp; punctuation tokens
       </label>
-      <p class="panel-hint">every token in any workspace cell&rsquo;s top-10 readout, ranked by how often it appears &middot; click a token to pin it &middot; steer or swap to intervene</p>
+      <p class="panel-hint">workspace top-10 tokens ranked by frequency · click to pin · steer or swap to intervene</p>
     </div>
     <div id="jspace" class="jspace"></div>
   </div>
@@ -180,9 +272,9 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
           <input id="iv-lo" type="number" min="0" max="30" value="12" class="iv-num"> &ndash;
           <input id="iv-hi" type="number" min="0" max="30" value="28" class="iv-num">
         </label>
-        <button id="iv-run">Run intervention</button>
+        <button id="iv-run">run intervention</button>
       </div>
-      <p class="panel-hint" id="iv-note">Words are matched in all single-token surface forms (&ldquo;&nbsp;tennis&rdquo;, &ldquo;&nbsp;Tennis&rdquo;, &hellip;), and layers 12&ndash;28 are the workspace band. Steer strength has a sharp threshold on this model &mdash; ~0.015 does nothing, ~0.02 takes over the output; negative values suppress. Swaps only sometimes redirect the answer at 4B scale (the paper reports ~13&ndash;18%) &mdash; often they just knock the source concept out.</p>
+      <p class="panel-hint" id="iv-note">Words match all single-token surface forms (&ldquo;&nbsp;tennis&rdquo;, &ldquo;&nbsp;Tennis&rdquo;, &hellip;) · workspace band L12&ndash;28 · steer threshold ~0.015 (no effect) to ~0.02 (takes over); negative values suppress · swaps redirect ~13&ndash;18% at 4B scale</p>
       <div id="iv-results" class="iv-results hidden">
         <div class="iv-col"><div class="card-label">default output</div><div id="iv-default" class="iv-text"></div></div>
         <div class="iv-col"><div class="card-label" id="iv-mod-label">with intervention</div><div id="iv-modified" class="iv-text"></div></div>
@@ -192,13 +284,13 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
   <div class="panel" id="grid-panel">
     <div class="panel-head">
-      <h2 id="grid-title">argmax &middot; layer &times; position</h2>
+      <h2 id="grid-title">argmax · layer &times; position</h2>
       <div class="panel-head-right">
         <div class="seg small" id="grid-mode" role="tablist" aria-label="Grid content">
           <button class="seg-btn active" data-grid="argmax" role="tab">argmax token</button>
           <button class="seg-btn" data-grid="rank" role="tab" disabled title="pin a token first">pin rank heatmap</button>
         </div>
-        <p class="panel-hint"><span id="meta"></span> &middot; click a cell to select &middot; hover for top-10</p>
+        <p class="panel-hint"><span id="meta"></span> · click cell to select · hover any cell for top-10</p>
       </div>
     </div>
     <div class="grid-scroll"><table id="grid"></table></div>
@@ -206,18 +298,20 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
 
   <div class="detail-row">
     <div class="panel" id="by-layer-panel">
-      <div class="panel-head"><h2 id="by-layer-title">by layer</h2><p class="panel-hint">top-k at the selected position, every layer · hover for details</p></div>
+      <div class="panel-head"><h2 id="by-layer-title">by layer</h2><p class="panel-hint">top-k at selected position · click token to pin/toggle chart trace</p></div>
       <div id="by-layer" class="stack"></div>
       <svg id="chart-layer" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs layer"></svg>
     </div>
     <div class="panel" id="by-pos-panel">
-      <div class="panel-head"><h2 id="by-pos-title">by position</h2><p class="panel-hint">top-k at the selected layer, every position · hover for details</p></div>
+      <div class="panel-head"><h2 id="by-pos-title">by position</h2><p class="panel-hint">top-k at selected layer · click token to pin/toggle chart trace</p></div>
       <div id="by-pos" class="stack"></div>
       <svg id="chart-pos" class="chart" viewBox="0 0 460 170" role="img" aria-label="pinned token rank vs position"></svg>
     </div>
   </div>
 
 </section>
+
+</main>
 
 <footer>
   <details>
@@ -227,7 +321,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
       <p>The <strong>logit lens</strong> toggle skips the transport and applies \(\mathrm{unembed}(h)\) directly. That is the classic baseline, and comparing the two is the point: the J-lens recovers interpretable intermediates many layers before the logit lens does.</p>
       <p>Row shading marks the three regions of the network. The early <strong>sensory</strong> layers are greyed out; their readouts are noisy and largely uninterpretable. The middle <strong>workspace</strong> band (layers 12&ndash;28 on this model) is where the interpretable action is. In the final <strong>motor</strong> layers the readout collapses onto the actual next-token prediction. The top row is the model&rsquo;s real output distribution.</p>
       <p><strong>Pinning</strong> a token colors every (layer&nbsp;&times;&nbsp;position) cell by that token&rsquo;s rank in the readout (log scale: 1 &middot; 10 &middot; 100 &middot; 1k+) and draws its rank trajectory in the charts, so you can watch a concept surface in the workspace and dissolve into the motor layers.</p>
-      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with optional system prompt, assistant prefill, and <strong>multi-turn history</strong> (prior user/assistant turns are sent before your latest message). Prompt and generation share a <strong>320-token</strong> budget &mdash; long histories leave less room for generation. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens, so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
+      <p><strong>Chat mode</strong> wraps your text in Qwen&rsquo;s chat template (thinking disabled, per the paper&rsquo;s verbal-report protocol), with optional system prompt, assistant prefill, and <strong>multi-turn history</strong> (prior user/assistant turns are sent before your latest message). Prompt and generation share a <strong>320-token</strong> budget; long histories leave less room for generation. <strong>Generation</strong> lets the model continue greedily and extends the lens over its own output tokens, so you can watch the workspace while the model writes. The <strong>J-Space</strong> panel aggregates the whole grid: every token in any top-10 readout, ranked by how often it appears, with its per-layer distribution.</p>
       <p><strong>Interventions</strong> (paper &sect;2.5) edit the residual stream through the lens itself. <em>Swap</em> exchanges two tokens&rsquo; lens coordinates across the workspace band (a reflection across their bisector); the model&rsquo;s &ldquo;thought&rdquo; is replaced and its output often follows. <em>Steer</em> injects a concept by adding a token&rsquo;s lens direction at every position, and the model becomes preoccupied with it. Both show the default and modified generations side by side. Effects at 4B scale are real but weaker than the paper&rsquo;s frontier-model numbers, and that contrast is itself the finding.</p>
     </div>
   </details>
@@ -247,7 +341,7 @@ window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, options: { enableMenu:
     Made by <a href="https://idhant.xyz" target="_blank" rel="noopener">Idhant</a> (and Claude Fable).
     Thanks to <a href="https://modal.com" target="_blank" rel="noopener">Modal</a> for compute.
   </p>
-  <p class="version-line">v0.2.12 &middot; last updated July 8, 2026</p>
+  <p class="version-line">v0.2.24 · last updated July 8, 2026</p>
 </footer>
 
 <script src="config.js"></script>

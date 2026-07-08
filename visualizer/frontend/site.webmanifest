@@ -1,0 +1,13 @@
+{
+  "name": "J-Lens Visualizer",
+  "short_name": "J-Lens",
+  "description": "Jacobian lens explorer for Qwen3.5-4B — per-layer readouts, rank heatmaps, and residual-stream interventions.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffdfa",
+  "theme_color": "#fffdfa",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/favicon-32x32.png", "sizes": "32x32", "type": "image/png" }
+  ]
+}

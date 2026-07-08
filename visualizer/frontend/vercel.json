@@ -4,6 +4,14 @@
     {
       "source": "/config.js",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "source": "/(robots.txt|sitemap.xml|site.webmanifest)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
+    },
+    {
+      "source": "/(og-image.jpg|hero-art.png|favicon.ico|favicon.svg|favicon-16x16.png|favicon-32x32.png|apple-touch-icon.png)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800, immutable" }]
     }
   ]
 }
