@@ -506,60 +506,166 @@ body.chat-mode .adv-field { opacity: 1; }
 #grid td.axis-tok.is-gen { color: var(--motor-ink); font-style: italic; }
 .stack-table tr.is-gen-row th.layer-label { color: var(--motor-ink); font-style: italic; }
 
-/* ---- J-Space aggregate panel ---- */
-.jspace { max-height: 380px; overflow-y: auto; padding: 4px 0 8px; }
-.js-row, .js-strip-legend {
-  display: flex; align-items: center; gap: 10px; padding: 6px 15px;
+/* ---- J-Space aggregate panel ----
+   Frequency table + continuous layer-distribution track (full lens depth,
+   workspace band highlighted). Inspired by dense layer-activity explorers. */
+.jspace {
+  max-height: 440px; overflow: auto; padding: 0 0 10px;
+  scrollbar-gutter: stable;
 }
-.js-row { border-bottom: 1px solid var(--line-soft); }
+.js-colhead,
+.js-axis,
+.js-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 168px) 48px minmax(220px, 1fr) 96px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  min-width: 560px;
+}
+.js-colhead {
+  position: sticky; top: 0; z-index: 3;
+  padding-top: 10px; padding-bottom: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--hint); font-weight: 500;
+}
+.js-tok-col { padding-left: 2px; }
+.js-count-col { text-align: right; }
+.js-dist-col {
+  display: inline-flex; align-items: center; gap: 8px; text-transform: none;
+  letter-spacing: 0; font-size: 11px; color: var(--muted); font-weight: 500;
+}
+.js-band-tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.02em;
+  color: var(--accent); background: var(--band-workspace);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 4px; padding: 1px 6px; text-transform: none;
+}
+.js-actions-col { min-height: 1px; }
+
+.js-axis {
+  padding-top: 22px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.js-row {
+  padding-top: 7px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--line-soft);
+  transition: background 120ms ease;
+}
 .js-row:last-child { border-bottom: none; }
-.js-row-body {
-  display: flex; align-items: center; gap: 10px; flex: none;
-  margin: -4px -8px; padding: 4px 8px; border-radius: 5px;
+.js-row:hover { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+
+.js-tok {
+  min-width: 0; max-width: none; width: 100%;
+  text-align: left; justify-self: stretch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.js-row-body:hover { background: var(--accent-soft); }
-.js-tok { min-width: 108px; max-width: 140px; text-align: left; flex: none; }
-.js-tok-ghost { visibility: hidden; min-width: 108px; max-width: 140px; flex: none; }
+.js-tok-ghost { visibility: hidden; min-height: 1px; }
 .js-count {
-  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
-  min-width: 34px; text-align: right; flex: none; font-variant-numeric: tabular-nums;
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  text-align: right; font-variant-numeric: tabular-nums; font-weight: 500;
 }
-.js-strip {
-  display: inline-flex; gap: 2px; flex: none; min-width: 0;
-  height: 16px; padding: 2px 3px; background: var(--panel-2);
-  border: 1px solid var(--line-soft); border-radius: 4px; align-items: stretch;
+
+/* Continuous layer track: one segment per lens layer, workspace band tinted. */
+.js-track {
+  position: relative;
+  display: flex; align-items: center; gap: 0;
+  height: 22px; min-width: 0; width: 100%;
+  padding: 0 1px;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent var(--band-left, 0%),
+      color-mix(in srgb, var(--accent) 11%, transparent) var(--band-left, 0%),
+      color-mix(in srgb, var(--accent) 11%, transparent) calc(var(--band-left, 0%) + var(--band-width, 100%)),
+      transparent calc(var(--band-left, 0%) + var(--band-width, 100%)),
+      transparent 100%
+    ),
+    linear-gradient(var(--panel-2), var(--panel-2));
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  overflow: hidden;
 }
-.js-strip i.js-cell {
-  flex: 1; min-width: 6px; border-radius: 2px; position: relative;
-  background: var(--accent); opacity: var(--cell-op, 1);
+.js-track::before,
+.js-track::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; width: 1px; z-index: 1; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 50%, var(--line));
 }
-.js-strip i.js-cell.is-zero {
+.js-track::before { left: var(--band-left, 0%); }
+.js-track::after { left: calc(var(--band-left, 0%) + var(--band-width, 100%)); }
+
+.js-track i.js-seg {
+  flex: 1 1 0; min-width: 0; height: 12px; position: relative;
+  background: var(--accent);
+  opacity: var(--seg-op, 1);
+  border-radius: 1px;
+  transition: opacity 120ms ease, height 120ms ease;
+}
+.js-track i.js-seg.is-out {
+  background: color-mix(in srgb, var(--motor-ink) 65%, var(--accent));
+}
+.js-track i.js-seg.is-zero {
   opacity: 1;
-  background: color-mix(in srgb, var(--faint) 14%, var(--panel-2));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--faint) 70%, var(--line));
-  box-sizing: border-box;
+  background: transparent;
+  height: 100%;
 }
-.js-strip i.js-cell.is-label {
-  background: transparent; border: none; opacity: 1; overflow: visible;
+.js-track i.js-seg:not(.is-zero):not(.is-label):hover {
+  opacity: 1;
+  height: 16px;
+  z-index: 2;
 }
-.js-strip i.js-cell.is-label span {
-  position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+
+.js-track-axis {
+  height: 14px;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.js-track-axis::before,
+.js-track-axis::after { display: none; }
+.js-track i.js-seg.is-label {
+  background: transparent; opacity: 1; overflow: visible;
+}
+.js-track i.js-seg.is-label.has-label {
+  border-left: 1px solid color-mix(in srgb, var(--faint) 55%, transparent);
+}
+.js-track i.js-seg.is-label span {
+  position: absolute; bottom: calc(100% + 5px); left: 0;
   font-family: var(--mono); font-size: 9px; font-weight: 500; color: var(--muted);
   white-space: nowrap; pointer-events: none; letter-spacing: 0.01em;
+  transform: translateX(-35%);
 }
-.js-strip-legend { padding-top: 16px; padding-bottom: 0; border-bottom: 1px solid var(--line); }
-.js-strip-legend .js-strip { background: transparent; border-color: transparent; height: 18px; }
-.js-actions { display: inline-flex; gap: 5px; visibility: hidden; min-width: 88px; flex: none; }
-.js-row:has(.js-row-body:hover) .js-actions,
-.js-row:has(.js-actions:hover) .js-actions { visibility: visible; }
+
+.js-actions {
+  display: inline-flex; gap: 5px; justify-content: flex-end;
+  opacity: 0; transition: opacity 120ms ease; min-width: 0;
+}
+.js-row:hover .js-actions,
+.js-row:focus-within .js-actions { opacity: 1; }
 .mini-btn {
-  background: none; border: 1px solid var(--line); color: var(--muted);
-  border-radius: 5px; padding: 1px 8px; font-size: 11px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 5px; padding: 2px 8px; font-size: 11px;
 }
-.mini-btn:hover { color: var(--accent); border-color: var(--accent); }
-.js-empty { padding: 10px 15px; }
+.mini-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.js-empty { padding: 14px 16px; }
 .js-filter { font-size: 12px; }
 .js-filter input { accent-color: var(--accent); margin: 0 2px 0 0; vertical-align: -2px; }
+
+@media (max-width: 720px) {
+  .js-colhead, .js-axis, .js-row {
+    grid-template-columns: minmax(96px, 1fr) 40px minmax(160px, 1.6fr);
+    gap: 8px; padding-left: 12px; padding-right: 12px; min-width: 0;
+  }
+  .js-actions-col, .js-actions { display: none; }
+  .js-dist-col { font-size: 10.5px; }
+  .js-band-tag { display: none; }
+}
 
 /* ---- intervention panel ---- */
 .intervene-body { padding: 12px 15px; }

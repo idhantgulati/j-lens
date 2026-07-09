@@ -134,8 +134,9 @@ function tipAccentFor(el) {
     const pin = S.pins[+el.dataset.pin];
     return pin ? pinColor(pin) : null;
   }
-  if (el.matches(".stack-table td.tok-cell, .pred, .js-tok")) {
+  if (el.matches(".stack-table td.tok-cell, .pred, .js-tok, .js-row")) {
     const si = +el.dataset.si;
+    if (Number.isNaN(si)) return null;
     const ps = pinStateForSi(si);
     if (ps && !ps.hidden) return pinColor(S.pins[ps.index]);
   }
@@ -311,27 +312,28 @@ function tipJRow(row) {
   const [w0, w1] = r.workspace_band;
   const layers = row.dataset.layers.split(",").map((x) => +x);
   const counts = row.dataset.counts.split(",").map((x) => +x);
-  const strip = layers.map((L, i) => {
-    const c = counts[i];
-    const cls = c ? "has-count" : "";
-    return `<span class="${cls}">L${L}${c ? ` · ${c}×` : ""}</span>`;
-  }).join("");
+  // Compact tip: only layers where the token actually appears.
+  const hits = layers.map((L, i) => [L, counts[i]]).filter(([, c]) => c > 0);
+  const strip = hits.slice(0, 18).map(([L, c]) =>
+    `<span class="has-count">L${L} · ${c}×</span>`).join("");
+  const more = hits.length > 18 ? `<span>+${hits.length - 18} more</span>` : "";
   return tipHead(tok) +
     tipMeta(`appears in <strong>${total}</strong> workspace top-10 cells`, `L${w0}–L${w1} · ${modeLabel()}`) +
-    `<div class="tip-strip">${strip}</div>` +
+    (strip ? `<div class="tip-strip">${strip}${more}</div>` : "") +
     tipFoot(pinStateForSi(si) ? traceTipFoot(si) : "click to pin · steer/swap on row hover");
 }
-function tipJCell(layer, count, si) {
+function tipJSeg(layer, count, si) {
   const r = S.resp;
   const tok = esc(JSON.stringify(r.strings[si]));
+  const band = bandBadge(layer);
   if (!count) {
     return tipHead(`L${layer}`) +
-      tipMeta(`token ${tok} not in top-10 at any workspace position on this layer`) +
-      tipFoot("darker cells = more frequent");
+      tipMeta(band, `token ${tok} not in top-10 at any position on this layer`) +
+      tipFoot("darker bars = more frequent");
   }
   return tipHead(`L${layer} · ${count}×`) +
-    tipMeta(`token ${tok} in top-10 at ${count} position${count === 1 ? "" : "s"} on this layer`) +
-    tipFoot("part of the workspace aggregate strip");
+    tipMeta(band, `token ${tok} in top-10 at ${count} position${count === 1 ? "" : "s"} on this layer`) +
+    tipFoot("part of the layer distribution");
 }
 function tipPinChip(pin, i) {
   const color = pinColor(pin);
@@ -373,7 +375,7 @@ function findTipTarget(el) {
     "#grid td.cell, #grid td.axis-tok, #grid th.layer-label, " +
     ".stack-table td.tok-cell, .stack-table th.layer-label, " +
     ".by-pos-table th.pos-label, .by-pos-table th.tok-label, " +
-    ".tr-tok, .pred, .js-row-body, .js-cell, .pin-chip, #prediction-list .pred, .chart-point"
+    ".tr-tok, .pred, .js-row, .js-seg, .pin-chip, #prediction-list .pred, .chart-point"
   );
 }
 
@@ -411,15 +413,16 @@ function buildTip(el) {
     const prob = +el.dataset.prob;
     return tipPred(si, prob, rank);
   }
-  if (el.matches(".js-row-body")) {
-    return tipJRow(el);
-  }
-  if (el.matches(".js-cell")) {
+  if (el.matches(".js-seg")) {
     const si = +el.dataset.si;
     if (si < 0) {
-      return tipHead(`L${el.dataset.layer}`) + tipMeta("layer axis on the workspace strip");
+      return tipHead(`L${el.dataset.layer}`) +
+        tipMeta(bandBadge(+el.dataset.layer), "layer axis on the distribution track");
     }
-    return tipJCell(+el.dataset.layer, +el.dataset.count, si);
+    return tipJSeg(+el.dataset.layer, +el.dataset.count, si);
+  }
+  if (el.matches(".js-row") && el.dataset.si !== undefined) {
+    return tipJRow(el);
   }
   if (el.matches(".pin-chip")) {
     const pin = S.pins[+el.dataset.pin];
@@ -442,10 +445,11 @@ document.addEventListener("mouseover", (e) => {
   if (!html) return;
   tipTarget = el;
   showTip(html, e.clientX, e.clientY, {
-    scrollable: el.matches("#grid td.cell, .js-row-body"),
+    scrollable: el.matches("#grid td.cell, .js-row"),
     accent: tipAccentFor(el),
   });
 });
+
 document.addEventListener("mousemove", (e) => {
   if (!tipTarget || tipEl.classList.contains("hidden")) return;
   if (findTipTarget(e.target) === tipTarget) positionTip(e.clientX, e.clientY);
@@ -734,21 +738,22 @@ function renderJSpace() {
   const L = r.lens_layers.length;
   const P = r.prompt_tokens.length;
   const [w0, w1] = r.workspace_band;
-  const wsIndices = [];
-  for (let li = 0; li < L; li++) {
+  const allIndices = [...Array(L).keys()];
+  const wsIndices = allIndices.filter((li) => {
     const layer = r.lens_layers[li];
-    if (layer >= w0 && layer <= w1) wsIndices.push(li);
-  }
+    return layer >= w0 && layer <= w1;
+  });
+  // Count every lens layer for the distribution track; rank by workspace total.
   const stats = new Map(); // strIdx -> {total, perLayer: Int32Array}
   for (let li = 0; li < L; li++) {
-    if (r.lens_layers[li] < w0 || r.lens_layers[li] > w1) continue; // workspace cells only
+    const inWs = r.lens_layers[li] >= w0 && r.lens_layers[li] <= w1;
     const layerTop = data.topk[li];
     for (let p = 0; p < P; p++) {
       for (const si of layerTop[p]) {
         let s = stats.get(si);
         if (!s) { s = { total: 0, perLayer: new Int32Array(L) }; stats.set(si, s); }
-        s.total++;
         s.perLayer[li]++;
+        if (inWs) s.total++;
       }
     }
   }
@@ -757,46 +762,69 @@ function renderJSpace() {
   const showAll = $("js-show-all").checked;
   const isContent = (si) => /\p{L}|\p{N}/u.test(r.strings[si]) && !/<.*>/.test(r.strings[si]);
   const rows = [...stats.entries()]
-    .filter(([si]) => showAll || isContent(si))
+    .filter(([si, s]) => s.total > 0 && (showAll || isContent(si)))
     .sort((a, b) => b[1].total - a[1].total).slice(0, 40);
-  const maxCell = Math.max(1, ...rows.map(([, s]) =>
-    Math.max(0, ...wsIndices.map((li) => s.perLayer[li]))));
-  const stripCell = (c, li, si) => {
+  const maxCell = Math.max(1, ...rows.map(([, s]) => Math.max(0, ...s.perLayer)));
+  const lo = r.lens_layers[0];
+  const hi = r.lens_layers[L - 1];
+  // Workspace band as a fraction of the full lens-layer track.
+  const bandLeft = ((w0 - lo) / Math.max(1, hi - lo + 1)) * 100;
+  const bandWidth = ((w1 - w0 + 1) / Math.max(1, hi - lo + 1)) * 100;
+
+  const seg = (c, li, si) => {
     const layer = r.lens_layers[li];
-    if (!c) return `<i class="js-cell is-zero" data-layer="${layer}" data-count="0" data-si="${si}"></i>`;
-    const op = (0.25 + 0.75 * c / maxCell).toFixed(2);
-    return `<i class="js-cell" style="--cell-op:${op}" data-layer="${layer}" data-count="${c}" data-si="${si}"></i>`;
+    const inWs = layer >= w0 && layer <= w1;
+    if (!c) {
+      return `<i class="js-seg is-zero${inWs ? "" : " is-out"}" data-layer="${layer}" data-count="0" data-si="${si}"></i>`;
+    }
+    const t = c / maxCell;
+    const op = (0.22 + 0.78 * Math.sqrt(t)).toFixed(2);
+    return `<i class="js-seg${inWs ? "" : " is-out"}" style="--seg-op:${op}" data-layer="${layer}" data-count="${c}" data-si="${si}"></i>`;
   };
-  const legend = wsIndices.length ? `<div class="js-strip-legend" aria-hidden="true">` +
-    `<div class="js-row-body">` +
+
+  const axisTicks = allIndices.map((li) => {
+    const layer = r.lens_layers[li];
+    const edge = layer === lo || layer === hi || layer === w0 || layer === w1;
+    const tick = edge || layer % 4 === 0;
+    return `<i class="js-seg is-label${tick ? " has-label" : ""}" data-layer="${layer}" data-count="0" data-si="-1">` +
+      `${tick ? `<span>L${layer}</span>` : ""}</i>`;
+  }).join("");
+
+  const trackStyle = `--band-left:${bandLeft.toFixed(2)}%; --band-width:${bandWidth.toFixed(2)}%;`;
+  const colHead =
+    `<div class="js-colhead" aria-hidden="true">` +
+    `<span class="js-tok-col">token</span>` +
+    `<span class="js-count-col">count</span>` +
+    `<span class="js-dist-col">distribution by layer` +
+    `<span class="js-band-tag">workspace L${w0}–${w1}</span></span>` +
+    `<span class="js-actions-col"></span></div>`;
+  const legend =
+    `<div class="js-axis" aria-hidden="true">` +
     `<span class="js-tok js-tok-ghost"></span><span class="js-count"></span>` +
-    `<span class="js-strip">` +
-    wsIndices.map((li) => {
-      const layer = r.lens_layers[li];
-      const edge = layer === w0 || layer === w1;
-      const tick = edge || layer % 4 === 0;
-      return `<i class="js-cell is-label${tick ? " has-label" : ""}" data-layer="${layer}" data-count="0" data-si="-1">` +
-        `${tick ? `<span>L${layer}</span>` : ""}</i>`;
-    }).join("") +
-    `</span></div><span class="js-actions"></span></div>` : "";
-  $("jspace").innerHTML = legend + rows.map(([si, s]) => {
-    const strip = wsIndices.map((li) => stripCell(s.perLayer[li], li, si)).join("");
+    `<span class="js-track js-track-axis" style="${trackStyle}">${axisTicks}</span>` +
+    `<span class="js-actions"></span></div>`;
+
+  const body = rows.map(([si, s]) => {
+    const strip = allIndices.map((li) => seg(s.perLayer[li], li, si)).join("");
+    // Tip / hover still focuses on workspace activity.
     const layerData = wsIndices.map((li) => r.lens_layers[li]).join(",");
     const countData = wsIndices.map((li) => s.perLayer[li]).join(",");
     const rowAttrs =
       `data-si="${si}" data-total="${s.total}" data-layers="${layerData}" data-counts="${countData}"`;
     const trace = tracedMarkup(si);
-    return `<div class="js-row">` +
-      `<div class="js-row-body" ${rowAttrs}>` +
+    return `<div class="js-row" ${rowAttrs}>` +
       `<button class="tok js-tok${trace.cls}"${trace.style} data-si="${si}">${esc(showTok(r.strings[si]))}</button>` +
       `<span class="js-count">${s.total}</span>` +
-      `<span class="js-strip" aria-hidden="true">${strip}</span>` +
-      `</div>` +
+      `<span class="js-track" style="${trackStyle}" aria-hidden="true">${strip}</span>` +
       `<span class="js-actions">` +
       `<button class="mini-btn" data-iv="steer" data-si="${si}">steer</button>` +
       `<button class="mini-btn" data-iv="swap" data-si="${si}">swap</button>` +
       `</span></div>`;
-  }).join("") || `<p class="panel-hint js-empty">no readout data</p>`;
+  }).join("");
+
+  $("jspace").innerHTML = rows.length
+    ? colHead + legend + body
+    : `<p class="panel-hint js-empty">no readout data</p>`;
 }
 
 function renderPins() {
