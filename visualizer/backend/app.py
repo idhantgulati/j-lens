@@ -10,15 +10,18 @@ container and serves a FastAPI app. Endpoints:
                         position) top-k over prompt AND generated tokens, for
                         J-lens, logit-lens, and the model's own output
     POST /api/rank      {request_id, ...same prompt params, token_id|token_str}
-                        -> the token's rank at every (layer, position)
+                        -> the token's rank at every (layer, position), plus a
+                        ±RANK_NEIGHBOR_WINDOW token/prob window around that rank
+                        for rank-heatmap hover context
     POST /api/intervene {...prompt params, kind: swap|steer, source, target?,
                         strength?, layer_lo?, layer_hi?} -> default vs modified
                         greedy generations (paper §2.5 workspace interventions)
 
 Chat mode wraps messages in Qwen's chat template with enable_thinking=False
 (main.ipynb verbal-report protocol); prefill text is appended to the template.
-`messages` carries prior user/assistant turns; `prompt` is always the latest user
-message. Prompt + generation share a single MAX_SEQUENCE token budget.
+`messages` is the conversation as currently edited (× may leave consecutive user
+turns); `prompt` is an optional extra latest user message. Prompt + generation
+share a single MAX_SEQUENCE token budget.
 Swap follows the notebook exactly: single-token surface-form pairs (leading
 space + case variants), bisector reflection at alpha=1 over the workspace band
 (layers 12-28). Steer adds strength * mean_residual_norm * unit lens vector.
@@ -44,6 +47,7 @@ MAX_CHARS = 4000
 MAX_SEQUENCE = 320   # total tokens analyzed (prompt + greedy generation)
 MAX_NEW = 128        # max generation tokens per request (clamped to remaining budget)
 MAX_K = 10
+RANK_NEIGHBOR_WINDOW = 1  # ±tokens around the pinned rank for hover context
 CACHE_SIZE = 8  # cached activations, ~40 MB each
 WORKSPACE_BAND = [12, 28]  # main.ipynb: WORKSPACE = range(round(0.38*n), round(0.92*n))
 NORM_PROMPTS = [  # generic contexts for mean_residual_norms (each > 17 tokens)
@@ -140,7 +144,12 @@ class Server:
     # ---- prompt rendering --------------------------------------------------
 
     def _chat_messages(self, req):
-        """Build chat-template message list: optional system, prior turns, latest user."""
+        """Build chat-template message list: optional system, prior turns, optional latest user.
+
+        `messages` is the conversation as currently edited (× may leave consecutive
+        user turns). `prompt` is appended as a final user turn only when non-empty,
+        so Analyze can run on history alone after the compose box was cleared.
+        """
         msgs = []
         if getattr(req, "system_prompt", None) and req.system_prompt.strip():
             msgs.append({"role": "system", "content": req.system_prompt.strip()})
@@ -152,20 +161,30 @@ class Server:
             if role not in ("user", "assistant"):
                 raise ValueError(f"invalid message role: {role}")
             msgs.append({"role": role, "content": content})
-        msgs.append({"role": "user", "content": req.prompt.strip()})
+        latest = (req.prompt or "").strip()
+        if latest:
+            msgs.append({"role": "user", "content": latest})
+        if not msgs or not any(m["role"] == "user" for m in msgs):
+            raise ValueError("chat needs at least one user message")
         return msgs
 
     def _render_text(self, req):
         """Final string fed to the model. Raw mode rstrips (a trailing space becomes
-        the readout token and wrecks baselines); the chat template is used verbatim."""
+        the readout token and wrecks baselines); the chat template is used verbatim.
+
+        After × edits the history may end on either role. Open a fresh assistant
+        turn when the last message is from the user, or when a prefill is set.
+        """
         if not getattr(req, "chat", False):
             return req.prompt.rstrip()
         msgs = self._chat_messages(req)
+        prefill = getattr(req, "prefill", None) or ""
+        open_assistant = msgs[-1]["role"] == "user" or bool(prefill)
         text = self.tok.apply_chat_template(
-            msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False
+            msgs, tokenize=False, add_generation_prompt=open_assistant, enable_thinking=False
         )
-        if getattr(req, "prefill", None):
-            text += req.prefill
+        if prefill:
+            text += prefill
         return text
 
     def _prompt_token_count(self, req):
@@ -205,6 +224,68 @@ class Server:
         h = acts[layer].to("cuda", self.torch.float32)
         z = self.lens.transport(h, layer) if use_jacobian else h
         return self.jlens.unembed(self.model, z).float()
+
+    def _rank_and_neighbors(self, lg, tid, window=RANK_NEIGHBOR_WINDOW):
+        """1-based ranks plus a ±window token window around the pinned token.
+
+        For each position returns neighbors as
+        ``{"start": lo, "tokens": [...], "probs": [...]}`` covering ranks
+        ``[max(1, R-window), min(V, R+window)]``. Above/below neighbors are the
+        tokens whose logits sit just better/worse than the pin (exact rank
+        adjacency aside from logit ties).
+        """
+        torch = self.torch
+        P, V = lg.shape
+        ranks = (1 + (lg > lg[:, tid : tid + 1]).sum(-1)).int()
+        probs = lg.softmax(-1)
+        pv = lg[:, tid]
+        w = max(0, int(window))
+        if w == 0:
+            return ranks, [
+                {
+                    "start": int(ranks[p]),
+                    "tokens": [self.tok.decode([tid])],
+                    "probs": [round(float(probs[p, tid]), 4)],
+                }
+                for p in range(P)
+            ]
+
+        above_lg = lg.masked_fill(lg <= pv.unsqueeze(1), float("inf"))
+        above_vals, above_idx = torch.topk(above_lg, w, dim=-1, largest=False)
+        below_lg = lg.masked_fill(lg >= pv.unsqueeze(1), float("-inf"))
+        below_vals, below_idx = below_lg.topk(w, dim=-1)
+
+        neighbors = []
+        pin_text = self.tok.decode([tid])
+        for p in range(P):
+            R = int(ranks[p])
+            lo = max(1, R - w)
+            hi = min(V, R + w)
+            items = []
+            for i in range(w):
+                r = R - 1 - i
+                if r < lo:
+                    break
+                if not torch.isfinite(above_vals[p, i]):
+                    break
+                t = int(above_idx[p, i])
+                items.append((r, self.tok.decode([t]), float(probs[p, t])))
+            items.reverse()
+            items.append((R, pin_text, float(probs[p, tid])))
+            for i in range(w):
+                r = R + 1 + i
+                if r > hi:
+                    break
+                if not torch.isfinite(below_vals[p, i]):
+                    break
+                t = int(below_idx[p, i])
+                items.append((r, self.tok.decode([t]), float(probs[p, t])))
+            neighbors.append({
+                "start": items[0][0],
+                "tokens": [t for _, t, _ in items],
+                "probs": [round(pr, 4) for _, _, pr in items],
+            })
+        return ranks, neighbors
 
     def _generate(self, ids, max_new_tokens, edits=()):
         """Greedy continuation under optional edits; returns decoded new text."""
@@ -284,14 +365,17 @@ class Server:
             layer_hi: int = WORKSPACE_BAND[1]
 
         def check_prompt(req):
-            if not req.prompt.strip():
+            prompt = (req.prompt or "").strip()
+            messages = req.messages or []
+            has_history = any((m.content or "").strip() for m in messages)
+            if not prompt and not (req.chat and has_history):
                 raise HTTPException(400, "empty prompt")
-            total = len(req.prompt)
-            for m in req.messages or []:
+            total = len(req.prompt or "")
+            for m in messages:
                 if m.role not in ("user", "assistant"):
                     raise HTTPException(400, f"invalid message role: {m.role}")
                 total += len(m.content)
-            if len(req.messages or []) > 24:
+            if len(messages) > 24:
                 raise HTTPException(400, "too many prior turns (max 24)")
             if total > MAX_CHARS:
                 raise HTTPException(413, f"prompt too long (max {MAX_CHARS} chars)")
@@ -386,19 +470,26 @@ class Server:
                         self._cache_put(req.request_id, ids, acts, gen_start)
                         entry, recomputed = self.cache[req.request_id], True
                     acts = entry["acts"]
-                    out = {"jlens_ranks": [], "logit_lens_ranks": []}
+                    out = {
+                        "jlens_ranks": [], "logit_lens_ranks": [],
+                        "jlens_neighbors": [], "logit_lens_neighbors": [],
+                    }
                     for l in self.lens.layers:
-                        for name, use_j in [("jlens_ranks", True), ("logit_lens_ranks", False)]:
+                        for name, use_j in [("jlens", True), ("logit_lens", False)]:
                             lg = self._layer_logits(acts, l, use_j)
-                            r = 1 + (lg > lg[:, tid : tid + 1]).sum(-1)
-                            out[name].append(r.int().cpu().tolist())
+                            ranks, neighbors = self._rank_and_neighbors(lg, tid)
+                            out[f"{name}_ranks"].append(ranks.cpu().tolist())
+                            out[f"{name}_neighbors"].append(neighbors)
                     mlg = self._layer_logits(acts, self.final, False)
-                    model_ranks = (1 + (mlg > mlg[:, tid : tid + 1]).sum(-1)).int().cpu().tolist()
+                    model_ranks, model_neighbors = self._rank_and_neighbors(mlg, tid)
+                    model_ranks = model_ranks.cpu().tolist()
                 self._log({"endpoint": "rank", "prompt": req.prompt[:2000],
                            "n_tokens": len(model_ranks),
                            "duration_ms": round((time.time() - t0) * 1000), "status": "ok"})
                 return {"token_id": tid, "token_text": self.tok.decode([tid]),
-                        "recomputed": recomputed, "model_ranks": model_ranks, **out}
+                        "recomputed": recomputed, "model_ranks": model_ranks,
+                        "model_neighbors": model_neighbors,
+                        "neighbor_window": RANK_NEIGHBOR_WINDOW, **out}
             except HTTPException:
                 raise
             except Exception as e:

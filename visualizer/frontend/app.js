@@ -73,8 +73,20 @@ function showTok(s) {
 function fmtRank(r) {
   return r < 1000 ? String(r) : (r / 1000).toFixed(r < 10000 ? 1 : 0) + "k";
 }
+// Exact integer for hover tooltips (grid cells keep the compact "24k" form).
+function fmtRankExact(r) {
+  return String(r);
+}
 function fmtProb(p) {
   return p < 0.005 ? "<.01" : p.toFixed(2);
+}
+// Leading top-k rows when the pin sits outside the list. Keep this short so the
+// pin±1 window + both ··· markers stay on-screen (a head of 10 was clipping).
+function tipHeadLimit(rank) {
+  if (rank == null) return 5;
+  if (rank >= 1000) return 5;
+  if (rank >= 100) return 6;
+  return 5; // ranks 11–99
 }
 function rankClass(r) {
   for (const [lim, cls] of RANK_CLASSES) if (r <= lim) return cls;
@@ -107,6 +119,15 @@ function rankAt(pin, layer, pos) {
   if (layer === r.n_layers - 1) return pin.ranks.model_ranks[pos];
   const li = r.lens_layers.indexOf(layer);
   return pin.ranks[S.mode === "jlens" ? "jlens_ranks" : "logit_lens_ranks"][li][pos];
+}
+// ±neighbor window from /api/rank (token strings + probs around the pin).
+function neighborsAt(pin, layer, pos) {
+  if (!pin?.ranks) return null;
+  const r = S.resp;
+  if (layer === r.n_layers - 1) return pin.ranks.model_neighbors?.[pos] ?? null;
+  const li = r.lens_layers.indexOf(layer);
+  const key = S.mode === "jlens" ? "jlens_neighbors" : "logit_lens_neighbors";
+  return pin.ranks[key]?.[li]?.[pos] ?? null;
 }
 function pinStateForSi(si) {
   if (!S.resp) return null;
@@ -185,48 +206,141 @@ function bandBadge(layer) {
 function modeLabel() {
   return S.mode === "jlens" ? "J-lens" : "logit lens";
 }
-function tipTopkList(tk, pr, { limit = 10, highlightSi = null } = {}) {
+function tipTopkList(tk, pr, { limit = 10, highlightSi = null, trailingGap = false } = {}) {
   const r = S.resp;
   const rows = tk.slice(0, limit).map((si, i) => {
     const top = i === 0 ? " is-top" : "";
-    const hi = highlightSi === si ? " is-top" : "";
-    return `<li class="${top || hi}">` +
+    const hi = highlightSi === si ? " is-pin" : "";
+    return `<li class="${(top + hi).trim()}">` +
       `<span class="tip-rank">${i + 1}</span>` +
       `<span class="tip-tok">${esc(showTok(r.strings[si]))}</span>` +
       `<span class="tip-prob">${fmtProb(pr[i])}</span></li>`;
   }).join("");
-  return `<ol class="tip-list">${rows}</ol>`;
+  return `<ol class="tip-list">${rows}${trailingGap ? tipGapRow() : ""}</ol>`;
+}
+function tipGapRow() {
+  return `<li class="is-gap" aria-hidden="true"><span class="tip-gap">···</span></li>`;
+}
+function tipTokenRow(rank, text, prob, { pin = false, top = false } = {}) {
+  const cls = [top ? "is-top" : "", pin ? "is-pin" : ""].filter(Boolean).join(" ");
+  const probStr = prob == null ? "—" : fmtProb(prob);
+  return `<li class="${cls}">` +
+    `<span class="tip-rank">${fmtRankExact(rank)}</span>` +
+    `<span class="tip-tok">${esc(showTok(text))}</span>` +
+    `<span class="tip-prob">${probStr}</span></li>`;
+}
+// Rank-heatmap hover: top head ··· pin±1 ···
+// Only collapse to the plain top-k list when the pin's rank is actually in 1..k.
+function tipRankAwareList(tk, pr, pin, layer, pos) {
+  const r = S.resp;
+  const rank = rankAt(pin, layer, pos);
+  const k = tk.length;
+
+  // Pin is inside the analyze top-k by rank → show that list, highlight it, trail ···.
+  if (rank >= 1 && rank <= k) {
+    const highlightSi = tk.find((si) => r.token_ids[si] === pin.tokenId) ?? null;
+    return tipTopkList(tk, pr, { highlightSi, trailingGap: true });
+  }
+
+  const neigh = neighborsAt(pin, layer, pos);
+  // Prefer a ±1 window around the pin (trim older ±2 payloads).
+  let winRows;
+  if (neigh?.tokens?.length) {
+    const pinIdx = neigh.tokens.findIndex((_, i) => neigh.start + i === rank);
+    const center = pinIdx >= 0 ? pinIdx : Math.floor(neigh.tokens.length / 2);
+    const lo = Math.max(0, center - 1);
+    const hi = Math.min(neigh.tokens.length - 1, center + 1);
+    winRows = [];
+    for (let i = lo; i <= hi; i++) {
+      winRows.push({
+        rank: neigh.start + i,
+        text: neigh.tokens[i],
+        prob: neigh.probs[i],
+        pin: neigh.start + i === rank,
+        top: false,
+      });
+    }
+  } else {
+    winRows = [{ rank, text: pin.text, prob: null, pin: true, top: false }];
+  }
+  const winStart = winRows[0].rank;
+
+  // Never let the head reach the pin window — always keep a ··· gap between them.
+  const headN = Math.min(tipHeadLimit(rank), k, Math.max(0, winStart - 2));
+  const headRows = [];
+  for (let i = 0; i < headN; i++) {
+    headRows.push({
+      rank: i + 1,
+      text: r.strings[tk[i]],
+      prob: pr[i],
+      pin: false,
+      top: i === 0,
+    });
+  }
+
+  let html = headRows.map((row) =>
+    tipTokenRow(row.rank, row.text, row.prob, { pin: row.pin, top: row.top })).join("");
+  // Leading ··· whenever the pin window isn't contiguous with the head.
+  if (headRows.length) html += tipGapRow();
+  else if (winStart > 1) html += tipGapRow();
+  html += winRows.map((row) =>
+    tipTokenRow(row.rank, row.text, row.prob, { pin: row.pin })).join("");
+  // Always trail with ··· — the vocab continues after the pin window.
+  html += tipGapRow();
+  return `<ol class="tip-list">${html}</ol>`;
 }
 function tipHead(text) { return `<p class="tip-head">${text}</p>`; }
-function tipMeta(...parts) { return `<p class="tip-meta">${parts.join(" ")}</p>`; }
+// Each part is a flex child so badge/text gaps stay even (no join-spaces + margin-right).
+function tipMeta(...parts) {
+  const html = parts.filter((p) => p != null && p !== "").map((p) =>
+    `<span class="tip-meta-part">${p}</span>`).join("");
+  return `<p class="tip-meta">${html}</p>`;
+}
 function tipFoot(text) { return `<p class="tip-foot">${text}</p>`; }
 
 function positionTip(x, y) {
   tipEl.classList.remove("hidden");
+  // Measure natural size first, then only clamp/scroll if it won't fit the viewport.
+  tipEl.classList.remove("is-scrollable");
+  tipEl.style.maxHeight = "";
   const pad = 14;
+  const margin = 10;
+  const natural = tipEl.getBoundingClientRect();
+  const maxH = Math.max(160, window.innerHeight - 2 * margin);
+  const needsScroll = natural.height > maxH;
+  tipEl.classList.toggle("is-scrollable", needsScroll);
+  tipEl.style.maxHeight = needsScroll ? `${maxH}px` : "";
+
   const rect = tipEl.getBoundingClientRect();
   let left = x + pad;
   let top = y + pad;
-  if (left + rect.width > window.innerWidth - 10) left = Math.max(10, x - rect.width - pad);
-  if (top + rect.height > window.innerHeight - 10) top = Math.max(10, y - rect.height - pad);
+  if (left + rect.width > window.innerWidth - margin) {
+    left = Math.max(margin, x - rect.width - pad);
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = Math.max(margin, y - rect.height - pad);
+  }
+  if (top + rect.height > window.innerHeight - margin) top = margin;
   tipEl.style.left = `${left}px`;
   tipEl.style.top = `${top}px`;
 }
 function showTip(html, x, y, opts = {}) {
-  const options = opts === true ? { scrollable: true } : opts;
+  const options = opts === true ? {} : opts;
   clearTimeout(tipHideTimer);
   tipEl.innerHTML = html;
-  tipEl.classList.toggle("is-scrollable", !!options.scrollable);
   tipEl.classList.toggle("is-accented", !!options.accent);
   if (options.accent) tipEl.style.setProperty("--tip-accent", options.accent);
   else tipEl.style.removeProperty("--tip-accent");
+  tipEl.classList.remove("is-scrollable");
+  tipEl.style.maxHeight = "";
   requestAnimationFrame(() => positionTip(x, y));
 }
 function hideTip() {
   tipHideTimer = setTimeout(() => {
     tipEl.classList.add("hidden");
-    tipEl.classList.remove("is-accented");
+    tipEl.classList.remove("is-accented", "is-scrollable");
     tipEl.style.removeProperty("--tip-accent");
+    tipEl.style.maxHeight = "";
     tipTarget = null;
   }, 60);
 }
@@ -236,16 +350,21 @@ function tipGridCell(L, p) {
   const [tk, pr] = topkAt(L, p);
   const ctx = esc(JSON.stringify(r.strings[r.prompt_tokens[p]]));
   const pin = S.gridMode === "rank" ? S.pins[S.activePin] : null;
-  let meta = `${bandBadge(L)}${modeLabel()}`;
+  const metaParts = [`context token ${ctx}`, bandBadge(L), modeLabel()];
   let foot = "click to select";
+  let list = tipTopkList(tk, pr);
   if (pin?.ranks) {
     const rank = rankAt(pin, L, p);
-    meta += `<span class="tip-badge is-rank">rank ${fmtRank(rank)}</span> for ${esc(JSON.stringify(pin.text))}`;
+    metaParts.push(
+      `<span class="tip-badge is-rank">rank ${fmtRankExact(rank)}</span>`,
+      `for ${esc(JSON.stringify(pin.text))}`,
+    );
     foot = `pinned rank · ${foot}`;
+    list = tipRankAwareList(tk, pr, pin, L, p);
   }
   return tipHead(`${layerLabel(L)} @ pos ${p}`) +
-    tipMeta(`context token ${ctx}`, meta) +
-    tipTopkList(tk, pr) +
+    tipMeta(...metaParts) +
+    list +
     tipFoot(foot);
 }
 function tipTokCell(si, rank, prob, layer, pos) {
@@ -360,13 +479,13 @@ function tipChartPoint(el) {
     const ctx = esc(JSON.stringify(S.resp.strings[S.resp.prompt_tokens[S.sel.pos]]));
     return tipHead(tok) +
       tipMeta(traceBadge, `${bandBadge(L)}${layerLabel(L)} @ pos ${S.sel.pos}`, `context ${ctx} · ${modeLabel()}`) +
-      `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRank(rank)}</dd></dl>`;
+      `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRankExact(rank)}</dd></dl>`;
   }
   const p = +el.dataset.pos;
   const ctx = esc(JSON.stringify(S.resp.strings[S.resp.prompt_tokens[p]]));
   return tipHead(tok) +
     tipMeta(traceBadge, `${bandBadge(S.sel.layer)}${layerLabel(S.sel.layer)} @ pos ${p}`, `context ${ctx} · ${modeLabel()}`) +
-    `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRank(rank)}</dd></dl>`;
+    `<dl class="tip-kv"><dt>rank</dt><dd class="tip-rank-val">#${fmtRankExact(rank)}</dd></dl>`;
 }
 
 function findTipTarget(el) {
@@ -445,7 +564,6 @@ document.addEventListener("mouseover", (e) => {
   if (!html) return;
   tipTarget = el;
   showTip(html, e.clientX, e.clientY, {
-    scrollable: el.matches("#grid td.cell, .js-row"),
     accent: tipAccentFor(el),
   });
 });
@@ -511,9 +629,23 @@ async function warmup() {
 
 // ---------- analyze ----------
 
+function hasAnalyzablePrompt(params) {
+  if ((params.prompt || "").trim()) return true;
+  // Chat mode: history alone is enough — Analyze runs on the current thread
+  // after × removals, including consecutive user turns / empty compose box.
+  return params.chat && (params.messages || []).some((m) => (m.content || "").trim());
+}
+
 async function analyze() {
   const params = promptParams();
-  if (!params.prompt.trim()) return;
+  if (!hasAnalyzablePrompt(params)) {
+    const banner = $("error-banner");
+    banner.textContent = S.chat === "chat"
+      ? "Enter a message, or keep at least one turn in the conversation."
+      : "Enter a prompt to analyze.";
+    banner.classList.remove("hidden");
+    return;
+  }
   const btn = $("analyze-btn");
   btn.disabled = true;
   btn.textContent = "reading…";
@@ -823,7 +955,7 @@ function renderJSpace() {
   }).join("");
 
   $("jspace").innerHTML = rows.length
-    ? colHead + legend + body
+    ? `<div class="js-sticky-head">${colHead}${legend}</div>${body}`
     : `<p class="panel-hint js-empty">no readout data</p>`;
 }
 
@@ -1231,8 +1363,11 @@ function clearChatTurns() {
 
 function maybeKeepChatTurns() {
   if (S.chat !== "chat" || !$("chat-keep").checked) return;
+  // Only append when the compose box contributed a new user turn. Re-analyzing
+  // an edited history with an empty compose must not duplicate turns.
   const userMsg = (S.params?.prompt || "").trim();
-  if (userMsg) S.chatTurns.push({ role: "user", content: userMsg });
+  if (!userMsg) return;
+  S.chatTurns.push({ role: "user", content: userMsg });
   if (S.resp?.completion) S.chatTurns.push({ role: "assistant", content: S.resp.completion });
   $("prompt").value = "";
   renderChatHistory();

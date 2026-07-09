@@ -50,7 +50,11 @@ tokens too.
   `model` `{topk, probs}` `[P][k]`, `workspace_band`, `request_id`, `timing_ms`.
   Prompt capped at 4000 chars / 200 tokens; `top_k` clamped to [1, 10].
 - `POST /api/rank` `{...params, request_id, token_id|token_str}` →
-  `jlens_ranks`/`logit_lens_ranks` `[31][P]`, `model_ranks` `[P]` (1-based).
+  `jlens_ranks`/`logit_lens_ranks` `[31][P]`, `model_ranks` `[P]` (1-based),
+  plus `jlens_neighbors`/`logit_lens_neighbors`/`model_neighbors` — for each
+  cell a `{start, tokens, probs}` window of ±1 ranks around the pin (used by
+  the rank-heatmap hover to show the pin in context when it sits outside the
+  analyze top-10).
 - `POST /api/intervene` `{...params, kind: "swap"|"steer", source, target?,
   strength?, layer_lo?, layer_hi?}` → default vs modified greedy generations plus
   next-token top-5 for each. Swap exchanges the two tokens' lens coordinates
